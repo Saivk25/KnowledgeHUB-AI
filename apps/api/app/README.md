@@ -47,6 +47,36 @@ consumer needs a server-computed aggregate yet: the Documents page calls
 `stats` field to this endpoint only when a future milestone actually needs
 it computed server-side.
 
+## Milestone 6 note (Metadata, Classification & Confidence)
+
+`services/classification.py` is a new `Classifier` registry, the same
+shape as `EmbeddingProvider`/`LLMProvider`:
+`LocalHeuristicClassifier` (default, zero-config, keyword-rule based) and
+`OpenAIClassifier` (auto-selected only when `CLASSIFICATION_PROVIDER=openai`
+and `OPENAI_API_KEY` are both set). Classification runs as a new
+`IngestionStep.CLASSIFYING` stage between extraction and chunking
+(`services/ingestion_service.py`). `models/resource.py` gained ten nullable
+columns (migration `0004_classification_metadata`): authoritative/display
+fields (`content_category`, `subject`, their confidences, and
+`_confirmed` flags) plus `auto_content_category`/`auto_subject` (always the
+latest automatic result, independent of confirmation state -- see
+`docs/adr/0013-classification-confidence.md` for why these are two
+separate layers, not one). `api/v1/routes/documents.py` gained
+**`PATCH /documents/{id}/classification`** for manual correction, and
+`_to_out()` now also surfaces `extractionConfidence` (an M5 field, exposed
+in the API for the first time here).
+
+**Confidence definitions, written down once (per DRR Section 9):**
+`extraction_confidence` = the extractor's own reported score (always 1.0
+except image OCR, which is Tesseract's real per-word confidence -- see
+ADR-0012). `content_category_confidence`/`subject_confidence` from
+`LocalHeuristicClassifier` = a documented, deterministic function of which
+keyword/phrase rules matched (see `classification.py`'s `CATEGORY_RULES`
+and the confidence-mapping constants) -- never invented. From
+`OpenAIClassifier`, both confidences are the number the model reported in
+its structured JSON response, unmodified. A confidence of `1.0` on a
+`_confirmed` field means "a human said so," not a model's estimate.
+
 Two consequences of the remaining dormant modules (Milestone 4 only, now)
 are worth being explicit about:
 

@@ -50,13 +50,18 @@ Milestone 5 addition: `extraction_confidence` (nullable float). Added by
 migration 0003 once Multi-Format Ingestion introduced a format (image OCR)
 whose extraction confidence is genuinely less than 1.0 -- see the field's
 own inline comment below and docs/adr/0012-multi-format-extraction.md.
+
+Milestone 6 addition: `content_category`/`subject` (+ confidences +
+`_confirmed` flags) and their `auto_*` counterparts (migration 0004). See
+those fields' own inline comments and
+docs/adr/0013-classification-confidence.md.
 """
 
 from __future__ import annotations
 
 import hashlib
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -68,6 +73,24 @@ class ResourceStatus:
     PROCESSING = "PROCESSING"
     READY = "READY"
     FAILED = "FAILED"
+
+
+class ResourceContentCategory:
+    """Milestone 6: the fixed, non-configurable content-category taxonomy
+    (per the approved design -- do not expand or make user-configurable in
+    this milestone). Directly from the original PRD's FR-1 list of content
+    categories layered on top of file formats. See
+    docs/adr/0013-classification-confidence.md."""
+
+    LECTURE = "LECTURE"
+    ASSIGNMENT = "ASSIGNMENT"
+    QUESTION_PAPER = "QUESTION_PAPER"
+    LAB_MANUAL = "LAB_MANUAL"
+    RESEARCH_PAPER = "RESEARCH_PAPER"
+    PERSONAL_NOTE = "PERSONAL_NOTE"
+    OTHER = "OTHER"
+
+    ALL = frozenset({LECTURE, ASSIGNMENT, QUESTION_PAPER, LAB_MANUAL, RESEARCH_PAPER, PERSONAL_NOTE, OTHER})
 
 
 class ResourceContentSource:
@@ -136,9 +159,39 @@ class Resource(Base, UUIDPK, TimestampMixin):
     # 1.0, and always the OCR engine's real score (see
     # app/services/extraction.py, docs/adr/0012-multi-format-extraction.md).
     # Nullable: unset until extraction completes, same lifecycle as
-    # text_hash. Stored now, not yet surfaced in the API response -- the
-    # confidence UX itself is Roadmap Milestone 10/11's job.
+    # text_hash. Surfaced in the API response as of Milestone 6 (see
+    # api/v1/routes/documents.py's _to_out()).
     extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # -- Milestone 6 (Metadata, Classification & Confidence) ---------------
+    # Two parallel layers, deliberately not one:
+    #
+    # 1. Authoritative/display fields (content_category, subject, and their
+    #    confidences) -- what the API returns and the UI shows. Once the
+    #    corresponding `_confirmed` flag is set (via PATCH
+    #    /documents/{id}/classification), automatic (re)classification must
+    #    never overwrite these again -- a user's correction is the ground
+    #    truth from that point on.
+    # 2. `auto_*` fields -- the most recent automatic classifier result,
+    #    always overwritten on every (re)classification run regardless of
+    #    confirmation state. This is deliberately NOT a "never reclassify
+    #    after correction" lock: automatic classification keeps running and
+    #    its output is preserved here for future evaluation/logging/
+    #    "suggest an updated classification" workflows, without ever
+    #    silently changing what the user sees. See
+    #    docs/adr/0013-classification-confidence.md.
+    content_category: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    content_category_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_category_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    subject_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    subject_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    auto_content_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    auto_content_category_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    auto_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    auto_subject_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     pages = relationship("ResourcePage", back_populates="resource", cascade="all, delete-orphan")
     chunks = relationship("ResourceChunk", back_populates="resource", cascade="all, delete-orphan")

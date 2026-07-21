@@ -33,6 +33,16 @@ Milestone 4 (RAG Chat, per app/README.md's milestone numbering -- unrelated
 to "Milestone 4" in the product roadmap sense used elsewhere in this repo).
 Nothing in this module reads from the vector store; it only writes to it
 (upsert on ingest, delete on document delete).
+
+Milestone 6 note (Metadata, Classification & Confidence): `_to_out` now
+surfaces `extractionConfidence` (an M5 field, first exposed here) and the
+classification fields (`contentCategory`, `subject`, their confidences and
+`_confirmed` flags -- see app/models/resource.py). New route, **`PATCH
+/documents/{id}/classification`**: lets the caller correct the
+auto-classified category/subject; once corrected, that field's `_confirmed`
+flag is set and automatic reclassification (e.g. on a future retry) will
+never overwrite it again (app/services/ingestion_service.py enforces this,
+not this route).
 """
 
 from __future__ import annotations
@@ -45,9 +55,10 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps import AppError, get_current_workspace
 from app.models.ingestion_job import IngestionJob
-from app.models.resource import Resource, ResourceContentSource, ResourceStatus
+from app.models.resource import Resource, ResourceContentCategory, ResourceContentSource, ResourceStatus
 from app.models.workspace import Workspace
 from app.schemas.document import (
+    ClassificationUpdateRequest,
     DocumentDetailOut,
     DocumentListOut,
     DocumentOut,
@@ -79,6 +90,13 @@ def _to_out(resource: Resource) -> DocumentOut:
         sizeBytes=resource.size_bytes or 0,
         errorMessage=resource.error_message,
         createdAt=resource.created_at.isoformat() if resource.created_at else "",
+        extractionConfidence=resource.extraction_confidence,
+        contentCategory=resource.content_category,
+        contentCategoryConfidence=resource.content_category_confidence,
+        contentCategoryConfirmed=resource.content_category_confirmed,
+        subject=resource.subject,
+        subjectConfidence=resource.subject_confidence,
+        subjectConfirmed=resource.subject_confirmed,
     )
 
 
@@ -368,4 +386,57 @@ def retry_document(
     resource.error_message = None
     db.commit()
     background_tasks.add_task(_run_ingestion, resource.id)
+    return _to_out(resource)
+
+
+@router.patch(
+    "/{document_id}/classification",
+    response_model=DocumentOut,
+    summary="Correct a document's auto-classified category or subject",
+    description=(
+        "Overrides the automatically detected content_category and/or "
+        "subject. At least one field is required (422 EMPTY_UPDATE "
+        "otherwise); contentCategory must be one of the fixed taxonomy "
+        "values (422 INVALID_CATEGORY otherwise). Once corrected, that "
+        "field is marked confirmed and automatic (re)classification will "
+        "never overwrite it again -- the automatic classifier keeps "
+        "running on future reprocessing and its output is still recorded "
+        "internally, it just no longer changes what this endpoint returns."
+    ),
+)
+def update_classification(
+    document_id: str,
+    body: ClassificationUpdateRequest,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: Session = Depends(get_db),
+):
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
+        raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
+
+    if body.contentCategory is None and body.subject is None:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "EMPTY_UPDATE",
+            "Provide contentCategory and/or subject to update.",
+        )
+
+    if body.contentCategory is not None:
+        if body.contentCategory not in ResourceContentCategory.ALL:
+            raise AppError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "INVALID_CATEGORY",
+                f"contentCategory must be one of: {', '.join(sorted(ResourceContentCategory.ALL))}.",
+            )
+        resource.content_category = body.contentCategory
+        resource.content_category_confidence = 1.0
+        resource.content_category_confirmed = True
+
+    if body.subject is not None:
+        subject = body.subject.strip()[:200]
+        resource.subject = subject or None
+        resource.subject_confidence = 1.0
+        resource.subject_confirmed = True
+
+    db.commit()
     return _to_out(resource)

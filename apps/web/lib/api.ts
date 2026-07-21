@@ -104,6 +104,15 @@ export interface AuthResponse {
   workspace: WorkspaceOut;
   accessToken: string;
 }
+export type ContentCategory =
+  | "LECTURE"
+  | "ASSIGNMENT"
+  | "QUESTION_PAPER"
+  | "LAB_MANUAL"
+  | "RESEARCH_PAPER"
+  | "PERSONAL_NOTE"
+  | "OTHER";
+
 export interface DocumentOut {
   id: string;
   filename: string;
@@ -112,6 +121,15 @@ export interface DocumentOut {
   sizeBytes: number;
   errorMessage: string | null;
   createdAt: string;
+  // Milestone 6: extraction confidence (M5 field, first exposed here) +
+  // classification metadata. See docs/adr/0013-classification-confidence.md.
+  extractionConfidence: number | null;
+  contentCategory: ContentCategory | null;
+  contentCategoryConfidence: number | null;
+  contentCategoryConfirmed: boolean;
+  subject: string | null;
+  subjectConfidence: number | null;
+  subjectConfirmed: boolean;
 }
 export interface IngestionJobOut {
   step: string;
@@ -173,6 +191,13 @@ export const api = {
   // Milestone 5 -- multi-format ingestion -- live
   ingestYoutubeVideo: (url: string) =>
     request<DocumentOut>("/api/v1/documents/youtube", { method: "POST", body: JSON.stringify({ url }) }),
+
+  // Milestone 6 -- classification correction -- live
+  updateClassification: (id: string, body: { contentCategory?: string; subject?: string }) =>
+    request<DocumentOut>(`/api/v1/documents/${id}/classification`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 
   // Milestone 4 -- chat (not mounted yet)
   createConversation: () => request<{ id: string; title: string }>("/api/v1/conversations", { method: "POST", body: JSON.stringify({}) }),

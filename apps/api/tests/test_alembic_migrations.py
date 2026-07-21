@@ -1,7 +1,9 @@
 """
 Milestone 4: Alembic migration chain integrity. Milestone 5 extended
 EXPECTED_RESOURCE_COLUMNS with `extraction_confidence` (migration
-0003_extraction_confidence) -- see that migration's docstring.
+0003_extraction_confidence) -- see that migration's docstring. Milestone 6
+extended it again with the ten classification/confidence columns (migration
+0004_classification_metadata).
 
 These tests exist because conftest.py's autouse fixture already runs
 `alembic upgrade head` for every other test in this suite (see conftest.py's
@@ -55,6 +57,16 @@ EXPECTED_RESOURCE_COLUMNS = {
     "status",
     "error_message",
     "extraction_confidence",
+    "content_category",
+    "content_category_confidence",
+    "content_category_confirmed",
+    "subject",
+    "subject_confidence",
+    "subject_confirmed",
+    "auto_content_category",
+    "auto_content_category_confidence",
+    "auto_subject",
+    "auto_subject_confidence",
 }
 
 NULLABLE_RESOURCE_COLUMNS = {
@@ -65,7 +77,18 @@ NULLABLE_RESOURCE_COLUMNS = {
     "checksum",
     "text_hash",
     "extraction_confidence",
+    "content_category",
+    "content_category_confidence",
+    "subject",
+    "subject_confidence",
+    "auto_content_category",
+    "auto_content_category_confidence",
+    "auto_subject",
+    "auto_subject_confidence",
 }
+
+# content_category_confirmed / subject_confirmed are NOT NULL (default
+# False) -- deliberately excluded from NULLABLE_RESOURCE_COLUMNS.
 
 
 @pytest.fixture

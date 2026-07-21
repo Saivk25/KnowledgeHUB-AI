@@ -32,6 +32,19 @@ PDF-specific -- it means "this PDF has no extractable text, i.e. it is
 probably a scanned image" (ADR-0006), a check that doesn't make sense for
 any other format. `resource.extraction_confidence` is populated from the
 extractor's result for every format, not only OCR (see resource.py).
+
+Milestone 6 update: adds a CLASSIFYING stage between extraction and
+chunking (see app/services/classification.py). Classification is
+enrichment metadata, not a prerequisite for a resource being usable --
+per the approved design, a classifier failure NEVER fails the resource.
+It degrades to content_category=OTHER, confidence=0.0, subject=None, a
+warning is logged, and the pipeline continues to chunking/embedding/
+indexing exactly as if classification had succeeded with a low-confidence
+result. `_apply_classification` writes the automatic result to the
+`auto_*` columns unconditionally, and to the authoritative/display columns
+only if the corresponding `_confirmed` flag is not already set -- a user's
+manual correction (via PATCH /documents/{id}/classification) is never
+silently overwritten by a later automatic (re)classification, e.g. on retry.
 """
 
 from __future__ import annotations
@@ -43,8 +56,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.ingestion_job import IngestionJob, IngestionStep
-from app.models.resource import Resource, ResourceChunk, ResourcePage, ResourceStatus, compute_text_hash
+from app.models.resource import (
+    Resource,
+    ResourceChunk,
+    ResourceContentCategory,
+    ResourcePage,
+    ResourceStatus,
+    compute_text_hash,
+)
 from app.services.chunking import chunk_pages
+from app.services.classification import Classification, get_classifier
 from app.services.embeddings import get_embedding_provider
 from app.services.extraction import ExtractionError, get_extractor_for
 from app.services.storage import get_storage
@@ -52,6 +73,27 @@ from app.services.vector_repo import VectorPoint, get_vector_repository, new_poi
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _apply_classification(resource: Resource, result: Classification) -> None:
+    """Writes an automatic classification result onto a resource, per the
+    approved Milestone 6 design: `auto_*` fields always reflect the latest
+    automatic run (for future evaluation/logging); the authoritative,
+    user-facing fields only follow the automatic result until the user
+    confirms a correction, after which they are never overwritten
+    automatically again."""
+
+    resource.auto_content_category = result.category
+    resource.auto_content_category_confidence = result.category_confidence
+    resource.auto_subject = result.subject
+    resource.auto_subject_confidence = result.subject_confidence
+
+    if not resource.content_category_confirmed:
+        resource.content_category = result.category
+        resource.content_category_confidence = result.category_confidence
+    if not resource.subject_confirmed:
+        resource.subject = result.subject
+        resource.subject_confidence = result.subject_confidence
 
 
 def process_document(db: Session, resource_id: str) -> None:
@@ -125,6 +167,22 @@ def process_document(db: Session, resource_id: str) -> None:
         # Extraction confidence (Milestone 5) -- see resource.py's field
         # comment. 1.0 for every format except image OCR.
         resource.extraction_confidence = result.confidence
+        db.commit()
+
+        if job:
+            job.step = IngestionStep.CLASSIFYING
+        db.commit()
+
+        try:
+            classification = get_classifier().classify(full_text, resource.filename or "")
+        except Exception:  # noqa: BLE001
+            # Graceful degradation (approved design): classification is
+            # enrichment, not a prerequisite -- never fail the resource
+            # over this. An honest "we don't know" (OTHER, confidence 0.0)
+            # beats either fabricating a category or blocking ingestion.
+            logger.warning("classification_failed resource_id=%s", resource.id, exc_info=True)
+            classification = Classification(category=ResourceContentCategory.OTHER, category_confidence=0.0)
+        _apply_classification(resource, classification)
         db.commit()
 
         if job:

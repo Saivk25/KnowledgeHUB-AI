@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     # path, `C:\Program Files\Tesseract-OCR\tesseract.exe`).
     TESSERACT_CMD: str | None = None
 
+    # -- Milestone 6 (Metadata, Classification & Confidence) -- read by
+    # app/services/classification.py. Mirrors EMBEDDING_PROVIDER/
+    # LLM_PROVIDER's exact pattern: the OpenAI-backed classifier is only
+    # ever selected when this is "openai" AND OPENAI_API_KEY is set;
+    # otherwise the dependency-free LocalHeuristicClassifier is used, so
+    # `docker compose up` with zero configuration still classifies every
+    # upload (with a real, if simple, signal -- see the classifier's own
+    # docstring).
+    CLASSIFICATION_PROVIDER: str = "local"  # local | openai
+
 
 @lru_cache
 def get_settings() -> Settings:

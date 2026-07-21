@@ -4,13 +4,25 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { api, ApiError, DocumentOut, IngestionJobOut } from "@/lib/api";
+import CategoryBadge from "@/components/CategoryBadge";
+import { api, ApiError, ContentCategory, DocumentOut, IngestionJobOut } from "@/lib/api";
 
 const STEPS = [
   { key: "UPLOADED", label: "Uploaded" },
   { key: "EXTRACTING", label: "Extracting text" },
+  { key: "CLASSIFYING", label: "Classifying content" },
   { key: "INDEXING", label: "Creating knowledge index" },
   { key: "DONE", label: "Ready" },
+];
+
+const CATEGORY_OPTIONS: ContentCategory[] = [
+  "LECTURE",
+  "ASSIGNMENT",
+  "QUESTION_PAPER",
+  "LAB_MANUAL",
+  "RESEARCH_PAPER",
+  "PERSONAL_NOTE",
+  "OTHER",
 ];
 
 function stepIndex(step: string | undefined) {
@@ -25,6 +37,11 @@ export default function DocumentDetailPage() {
   const [job, setJob] = useState<IngestionJobOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [editingClassification, setEditingClassification] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState<string>("");
+  const [subjectDraft, setSubjectDraft] = useState<string>("");
+  const [savingClassification, setSavingClassification] = useState(false);
+  const [classificationError, setClassificationError] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -55,6 +72,30 @@ export default function DocumentDetailPage() {
       alert(err instanceof ApiError ? err.message : "Couldn't retry this document.");
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const startEditingClassification = () => {
+    setCategoryDraft(document?.contentCategory || "OTHER");
+    setSubjectDraft(document?.subject || "");
+    setClassificationError(null);
+    setEditingClassification(true);
+  };
+
+  const onSaveClassification = async () => {
+    setSavingClassification(true);
+    setClassificationError(null);
+    try {
+      const updated = await api.updateClassification(params.id, {
+        contentCategory: categoryDraft,
+        subject: subjectDraft,
+      });
+      setDocument(updated);
+      setEditingClassification(false);
+    } catch (err) {
+      setClassificationError(err instanceof ApiError ? err.message : "Couldn't save this correction.");
+    } finally {
+      setSavingClassification(false);
     }
   };
 
@@ -94,13 +135,86 @@ export default function DocumentDetailPage() {
                 </button>
               </div>
             ) : document.status === "READY" ? (
-              <div className="mt-6 rounded-lg border border-emerald/30 bg-emerald/10 px-4 py-3 text-sm text-emerald-700">
-                This document is ready — {document.pageCount} pages indexed.
-                {/* Milestone 3 (Document Ingestion): no link to /chat here -- that route
-                    isn't mounted until Milestone 4 (RAG Chat). Being indexed and queryable
-                    are two different milestones' deliverables. */}
-                <div className="mt-3 text-xs text-emerald-600/80">
-                  Asking questions about this document arrives in Milestone 4.
+              <div className="mt-6 space-y-4">
+                <div className="rounded-lg border border-emerald/30 bg-emerald/10 px-4 py-3 text-sm text-emerald-700">
+                  This document is ready — {document.pageCount} pages indexed.
+                  {/* Milestone 3 (Document Ingestion): no link to /chat here -- that route
+                      isn't mounted until Milestone 4 (RAG Chat). Being indexed and queryable
+                      are two different milestones' deliverables. */}
+                  <div className="mt-3 text-xs text-emerald-600/80">
+                    Asking questions about this document arrives in Milestone 4.
+                  </div>
+                </div>
+
+                {/* Milestone 6: classification + confidence. Stored/computed
+                    since ingestion; this is the first milestone that surfaces
+                    it in the UI, with a manual-correction affordance. */}
+                <div className="rounded-lg border border-edge bg-surface px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Classification</p>
+
+                  {!editingClassification ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <CategoryBadge category={document.contentCategory} />
+                      {document.contentCategoryConfidence !== null && !document.contentCategoryConfirmed && (
+                        <span className="text-xs text-slate-400">
+                          {Math.round(document.contentCategoryConfidence * 100)}% confidence
+                        </span>
+                      )}
+                      {document.contentCategoryConfirmed && (
+                        <span className="text-xs text-slate-400">confirmed by you</span>
+                      )}
+                      {document.subject && (
+                        <span className="text-sm text-slate-600">— {document.subject}</span>
+                      )}
+                      {document.extractionConfidence !== null && document.extractionConfidence < 1 && (
+                        <span className="text-xs text-amber-700">
+                          extraction confidence {Math.round(document.extractionConfidence * 100)}%
+                        </span>
+                      )}
+                      <button
+                        onClick={startEditingClassification}
+                        className="text-xs font-medium text-indigo hover:underline"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      <select
+                        value={categoryDraft}
+                        onChange={(e) => setCategoryDraft(e.target.value)}
+                        className="w-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-ink"
+                      >
+                        {CATEGORY_OPTIONS.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        value={subjectDraft}
+                        onChange={(e) => setSubjectDraft(e.target.value)}
+                        placeholder="Subject (optional)"
+                        className="w-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-ink"
+                      />
+                      {classificationError && <p className="text-xs text-rose-700">{classificationError}</p>}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={onSaveClassification}
+                          disabled={savingClassification}
+                          className="rounded-lg bg-indigo px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo/90 disabled:opacity-50"
+                        >
+                          {savingClassification ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          onClick={() => setEditingClassification(false)}
+                          className="rounded-lg border border-edge px-3 py-1.5 text-xs font-medium text-ink hover:bg-canvas"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

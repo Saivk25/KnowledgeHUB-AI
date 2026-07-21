@@ -17,6 +17,26 @@ class DocumentOut(BaseModel):
     sizeBytes: int
     errorMessage: str | None = None
     createdAt: str
+    # Milestone 6: extraction confidence (Milestone 5 field, first surfaced
+    # here) + classification metadata. See app/models/resource.py and
+    # docs/adr/0013-classification-confidence.md.
+    extractionConfidence: float | None = None
+    contentCategory: str | None = None
+    contentCategoryConfidence: float | None = None
+    contentCategoryConfirmed: bool = False
+    subject: str | None = None
+    subjectConfidence: float | None = None
+    subjectConfirmed: bool = False
+
+
+class ClassificationUpdateRequest(BaseModel):
+    """Milestone 6: PATCH /documents/{id}/classification body. At least one
+    of the two fields must be provided (enforced in the route, not here,
+    to produce a clear 422 error code rather than a generic validation
+    error)."""
+
+    contentCategory: str | None = None
+    subject: str | None = None
 
 
 class DocumentListOut(BaseModel):

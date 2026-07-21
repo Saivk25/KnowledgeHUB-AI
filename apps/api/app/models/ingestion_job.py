@@ -10,6 +10,12 @@ from app.models.mixins import UUIDPK
 class IngestionStep:
     UPLOADED = "UPLOADED"
     EXTRACTING = "EXTRACTING"
+    # Milestone 6: classification (content category + subject suggestion)
+    # runs once extraction produces the resource's full text, before
+    # chunking/embedding/indexing. A classifier failure never lands here as
+    # FAILED -- see app/services/classification.py and
+    # app/services/ingestion_service.py's graceful-degradation handling.
+    CLASSIFYING = "CLASSIFYING"
     INDEXING = "INDEXING"
     DONE = "DONE"
     FAILED = "FAILED"

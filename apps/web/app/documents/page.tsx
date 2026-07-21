@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import CategoryBadge from "@/components/CategoryBadge";
 import StatusBadge from "@/components/StatusBadge";
 import { api, ApiError, DocumentOut } from "@/lib/api";
 
@@ -95,6 +96,7 @@ export default function DocumentLibraryPage() {
               <thead className="border-b border-edge bg-canvas text-left text-xs uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="px-4 py-3">Title</th>
+                  <th className="px-4 py-3">Category</th>
                   <th className="px-4 py-3">Pages</th>
                   <th className="px-4 py-3">Uploaded</th>
                   <th className="px-4 py-3">Status</th>
@@ -108,6 +110,9 @@ export default function DocumentLibraryPage() {
                       <Link href={`/documents/${doc.id}`} className="font-medium text-ink hover:text-indigo">
                         {doc.filename}
                       </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <CategoryBadge category={doc.contentCategory} />
                     </td>
                     <td className="px-4 py-3 text-slate-500">{doc.pageCount || "—"}</td>
                     <td className="px-4 py-3 text-slate-500">{new Date(doc.createdAt).toLocaleDateString()}</td>
