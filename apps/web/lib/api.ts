@@ -7,13 +7,14 @@
  * `credentials: "include"` is required on calls that need auth so the
  * httpOnly auth cookie set by the API is sent on subsequent requests.
  *
- * Milestone status: `liveness`/`readiness` (Milestone 1) and
+ * Milestone status: `liveness`/`readiness` (Milestone 1),
  * `register`/`login`/`logout`/`me`/`getWorkspace`/`updateWorkspace`/
- * `updateProfile` (Milestone 2) are wired to live backend routers.
- * Everything under "Milestone 3" and "Milestone 4" below is kept here
- * (rather than deleted) because the screens in app/_future/ already call
- * them and are ready to go live the moment each router is approved and
- * mounted; see app/_future/README.md.
+ * `updateProfile` (Milestone 2), and `listDocuments`/`getDocumentDetail`/
+ * `uploadDocument`/`deleteDocument`/`retryDocument`/`fileUrl` (Milestone 3)
+ * are all wired to live backend routers. Everything under "Milestone 4"
+ * below is kept here (rather than deleted) because the dormant chat
+ * screen in app/_future/ already calls it and is ready to go live the
+ * moment that router is approved and mounted; see app/_future/README.md.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -69,8 +70,8 @@ export interface LivenessResponse {
   app: string;
 }
 
-// -- Milestone 2: auth, workspace (live) --------------------------------
-// -- Milestones 3-4: documents, chat (types kept for app/_future/ screens,
+// -- Milestones 2-3: auth, workspace, documents (all live) --------------
+// -- Milestone 4: chat (type kept for the dormant app/_future/ screen,
 //    not yet backed by a mounted router) -------------------------------
 
 export interface UserOut {
@@ -83,11 +84,16 @@ export interface WorkspaceOut {
   name: string;
 }
 // Milestone note: `stats` is optional because the backend does not return
-// it until the Document model exists in Milestone 3 (see
-// apps/api/app/api/v1/routes/workspace.py). It is declared here -- rather
-// than omitted -- only because the dormant Milestone 4 chat screen
-// (app/_future/chat/page.tsx) already reads it; making it optional keeps
-// that type-check honest without reactivating or rewriting that screen.
+// it -- GET /workspace still only returns { workspace }. It is declared
+// here -- rather than omitted -- only because the dormant Milestone 4
+// chat screen (app/_future/chat/page.tsx) already reads it; making it
+// optional keeps that type-check honest without reactivating or
+// rewriting that screen. (It was going to be Milestone 3's job per the
+// original module map, but the Document model in this milestone tracks
+// per-document status, not workspace-level aggregate counts -- the
+// Documents page instead calls listDocuments() and computes its own
+// counts client-side. Add a real `stats` aggregate to GET /workspace
+// only if a future milestone needs it server-computed.)
 export interface WorkspaceStatsOut {
   readyDocuments: number;
   processingDocuments: number;
@@ -144,15 +150,15 @@ export const api = {
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
   me: () => request<{ user: UserOut; workspace: WorkspaceOut | null }>("/api/v1/auth/me"),
 
-  // `stats` is not present on the live Milestone 2 response yet -- see
-  // WorkspaceStatsOut's doc comment above.
+  // `stats` is not present on the live response -- see WorkspaceStatsOut's
+  // doc comment above.
   getWorkspace: () => request<{ workspace: WorkspaceOut; stats?: WorkspaceStatsOut }>("/api/v1/workspace"),
   updateWorkspace: (name: string) =>
     request<{ workspace: WorkspaceOut }>("/api/v1/workspace", { method: "PATCH", body: JSON.stringify({ name }) }),
   updateProfile: (displayName: string) =>
     request<{ user: UserOut }>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify({ displayName }) }),
 
-  // Milestone 3 -- documents (not mounted yet)
+  // Milestone 3 -- documents -- live
   listDocuments: () => request<{ items: DocumentOut[] }>("/api/v1/documents"),
   getDocumentDetail: (id: string) => request<{ document: DocumentOut; processingJob: IngestionJobOut | null }>(`/api/v1/documents/${id}`),
   uploadDocument: (file: File) => {

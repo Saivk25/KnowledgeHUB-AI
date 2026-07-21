@@ -1,8 +1,4 @@
-# Milestone 1 (Project Foundation) + Milestone 2 (Authentication) dependencies.
-# PyMuPDF, python-multipart, and httpx (for AI providers) are used by later
-# milestones (document ingestion, RAG chat) and are intentionally not
-# installed yet -- they will be added back to this file in the milestone
-# that introduces the feature that needs them.
+# Milestone 1 + Milestone 2 + Milestone 3 dependencies.
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
@@ -23,3 +19,17 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-jose[cryptography]==3.3.0
 email-validator==2.2.0
+
+# Milestone 3 -- document upload & ingestion
+# PyMuPDF: PDF text extraction (app/services/extraction.py). python-multipart:
+# FastAPI/Starlette requires it to parse multipart/form-data file uploads --
+# without it, UploadFile routes raise at request time, not at import time,
+# so it's easy to miss until someone actually uploads a file.
+PyMuPDF==1.24.10
+python-multipart==0.0.12
+# httpx: app/services/embeddings.py imports it directly at module level for
+# OpenAIEmbeddingProvider. It was already present transitively via
+# qdrant-client, but a module that imports a package directly should
+# declare it directly rather than rely on another package's transitive
+# dependency, which could change or be dropped without notice.
+httpx==0.27.2

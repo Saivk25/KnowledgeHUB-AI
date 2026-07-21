@@ -95,11 +95,12 @@ export default function DocumentDetailPage() {
               </div>
             ) : document.status === "READY" ? (
               <div className="mt-6 rounded-lg border border-emerald/30 bg-emerald/10 px-4 py-3 text-sm text-emerald-700">
-                This document is ready — {document.pageCount} pages indexed. You can ask questions about it now.
-                <div className="mt-3">
-                  <Link href="/chat" className="rounded-lg bg-indigo px-4 py-2 text-sm font-medium text-white hover:bg-indigo/90">
-                    Open AI Chat
-                  </Link>
+                This document is ready — {document.pageCount} pages indexed.
+                {/* Milestone 3 (Document Ingestion): no link to /chat here -- that route
+                    isn't mounted until Milestone 4 (RAG Chat). Being indexed and queryable
+                    are two different milestones' deliverables. */}
+                <div className="mt-3 text-xs text-emerald-600/80">
+                  Asking questions about this document arrives in Milestone 4.
                 </div>
               </div>
             ) : (

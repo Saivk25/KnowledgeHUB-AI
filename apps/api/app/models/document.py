@@ -22,7 +22,10 @@ class Document(Base, UUIDPK, TimestampMixin):
     storage_key: Mapped[str] = mapped_column(String(1024), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False, default="application/pdf")
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    checksum: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    # index=True: every upload runs a duplicate-detection query filtered on
+    # (workspace_id, checksum) -- see app/api/v1/routes/documents.py. Without
+    # an index here, that's a full per-workspace scan on every upload.
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     page_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=DocumentStatus.QUEUED)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

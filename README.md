@@ -2,114 +2,107 @@
 
 **Your Organization's Intelligence, Instantly Searchable.**
 
-> **Status: Milestone 2 -- Authentication & Workspace.** This README
-> describes only what exists right now. Document ingestion and RAG chat
-> are specified in the frozen SRS and will be built in the milestones
-> that follow, each reviewed and approved before the next begins. See
-> [Roadmap](#roadmap) below.
+> **Status: Milestone 3 -- Document Upload & Ingestion.** This README
+> describes only what exists right now. RAG chat with citations is
+> specified in the frozen SRS and will be built in the milestone that
+> follows, after review. See [Roadmap](#roadmap) below.
 
 ## What this milestone proves
 
-Real accounts, real sessions, real isolation. A user can register, log
-in, and land in a private workspace that belongs only to them --
-enforced server-side, not just hidden in the UI -- on top of the
-Milestone 1 foundation (Next.js + FastAPI + PostgreSQL + Qdrant, all
-containerized and health-checked).
+A real, working ingestion pipeline: upload a PDF into your own workspace,
+watch it move from `QUEUED` through extraction and indexing to `READY`,
+and have its text genuinely chunked, embedded, and stored in Qdrant --
+scoped to your workspace and nobody else's -- on top of the Milestone 2
+authentication foundation. Nothing in this milestone reads that index
+back yet; that's Milestone 4.
 
 ## What's included
 
 - Monorepo layout (`apps/api`, `apps/web`)
-- FastAPI backend: CORS (`GET`/`POST`/`PATCH`, credentials enabled for the
-  session cookie -- see Security below), structured logging, generic
-  error handling (including request-validation errors -- see Security),
-  liveness (`GET /health`) and readiness (`GET /health/ready`) endpoints
-- Authentication: register, login, logout, `GET /api/v1/auth/me`; bcrypt
-  password hashing; JWT sessions delivered as an httpOnly cookie (browser
-  clients) and also returned in the response body (non-browser clients),
-  either of which `app/deps.get_current_user` will accept
-- Workspace: every account gets a personal workspace on registration
-  (`GET`/`PATCH /api/v1/workspace`); user profile updates
-  (`PATCH /api/v1/users/me`); a minimal workspace shell screen after login;
-  `workspaces.owner_user_id` is indexed since every protected request
-  looks up "the current user's workspace" by that column
-- All authenticated response shapes (`/auth/me`, `/workspace`, `/users/me`)
-  have explicit Pydantic `response_model`s, so the OpenAPI schema at
-  `/docs` matches what the endpoints actually return
-- Next.js frontend: landing page with Login/Register CTAs and a live
-  system-status panel, login/register/settings screens, a protected
-  workspace shell (`AuthProvider` + `useRequireAuth` redirect unauthenticated
-  visitors to `/login`)
-- PostgreSQL (via SQLAlchemy) and Qdrant, both reachability-checked by
-  `/health/ready`; `users` and `workspaces` tables now exist
-- Docker Compose stack: `postgres`, `qdrant`, `api`, `web`. `api` and `web`
-  build lean, dependency-minimal images (see Security below); each has a
-  container health check except `qdrant` (see the comment in
-  `docker-compose.yml` for why)
-- CI: backend lint (`ruff` + `black --check`), backend tests (`pytest`),
-  frontend type-check (`tsc --noEmit`) + build
+- FastAPI backend: CORS (`GET`/`POST`/`PATCH`/`DELETE`, credentials
+  enabled for the session cookie), structured logging, generic error
+  handling, liveness/readiness endpoints
+- Authentication + workspace (Milestone 2, unchanged): register, login,
+  logout, profile, workspace rename -- all still live and tested
+- Document upload & ingestion (this milestone):
+  - `POST /api/v1/documents` -- accepts a PDF, returns immediately with
+    `status: "QUEUED"`; validates file type, size (`MAX_UPLOAD_MB`,
+    default 25), and rejects empty files or exact duplicate re-uploads
+    (by content checksum) within the same workspace
+  - Ingestion runs as a FastAPI `BackgroundTask` (ADR-0005):
+    **extract** (PyMuPDF native text layer) -> **chunk** (page-aware,
+    ~500-token chunks with overlap, so every chunk still maps to exactly
+    one page) -> **embed** (pluggable provider, defaults to a
+    zero-config local hashing embedder; swaps to OpenAI's embeddings API
+    by setting `OPENAI_API_KEY` and `EMBEDDING_PROVIDER=openai`) ->
+    **index** (upsert into Qdrant, payload-filtered by `workspace_id`)
+  - `GET /api/v1/documents` (list), `GET /api/v1/documents/{id}` (detail
+    + processing-job status), `GET /api/v1/documents/{id}/file`
+    (download the original PDF), `DELETE /api/v1/documents/{id}`
+    (removes DB rows, vector points, and the stored file),
+    `POST /api/v1/documents/{id}/retry` (only for `FAILED` documents)
+  - Document metadata (filename, status, page count, size, checksum,
+    error message) lives in PostgreSQL; extracted page text and chunks
+    live in their own tables (`document_pages`, `document_chunks`) so
+    Milestone 4's retrieval path can query them directly
+  - Scanned/image-only PDFs (no extractable text) fail fast with a clear
+    `SCANNED_PDF_UNSUPPORTED` error rather than silently indexing nothing
+    (ADR-0006 -- no OCR in this MVP)
+  - Next.js: a documents library (search, status chips, delete), an
+    upload screen (drag-and-drop, client-side validation), and a detail
+    screen that polls and shows live ingestion progress
+- All document endpoints have explicit Pydantic `response_model`s and
+  OpenAPI `summary`/`description`s, matching Milestone 2's pattern
+- Docker Compose: added a named `api_storage` volume so uploaded files
+  survive `docker compose down`/rebuilds, same as `postgres_data`/
+  `qdrant_data` already do
+- CI: unchanged commands (`pytest`, `ruff`, `black --check`,
+  `tsc --noEmit`, `next build`) now exercise the ingestion pipeline too
 
 ## What's deliberately not included yet
 
-No document upload, no embeddings, no RAG. Screens and backend modules
-for those features were prototyped in an earlier pass and still exist in
-the repository (see [Roadmap](#roadmap),
-[`apps/api/app/README.md`](apps/api/app/README.md), and
-[`apps/web/app/_future/README.md`](apps/web/app/_future/README.md)), but
-they are **not wired into the running application** -- `app/api/v1/router.py`
-mounts only `auth` and `workspace`, and the corresponding Next.js pages
-(`documents/`, `chat/`) sit in a Next.js "private folder" (`app/_future/`)
-so they are not routable. `GET /workspace` also does not yet report
-document counts, for the same reason (see that module's docstring). This
-is intentional: each feature goes live only in the milestone that
-introduces it, after review.
+No retrieval, no chat, no citations, no LLM question answering -- see
+Milestone 4. `app/api/v1/router.py` mounts `auth`, `workspace`, and
+`documents`, but not `chat`; the corresponding Next.js chat screen still
+sits in `app/_future/` (see
+[`apps/web/app/_future/README.md`](apps/web/app/_future/README.md)).
+`app/services/embeddings.py` and `app/services/vector_repo.py` are
+already shared with Milestone 4 (see
+[`apps/api/app/README.md`](apps/api/app/README.md)), but only their
+*write* paths (embed a chunk, upsert/delete a vector) are exercised this
+milestone -- their *read* paths (embed a question, search the vector
+store) belong to `app/services/retrieval_service.py`, which nothing
+imports yet. This split was already at the function level before this
+milestone started, which is exactly what makes Milestone 4 "consume
+without architectural changes" possible.
 
 ## Security posture for this milestone
 
-- CORS allows exactly one origin (`WEB_ORIGIN`, default
-  `http://localhost:3000`), `GET`/`POST`/`PATCH` only, and
-  `allow_credentials=True` -- required now that the session is carried in
-  a cookie. Still never a wildcard origin.
-- Passwords are hashed with bcrypt (`passlib`), never stored or logged in
-  plaintext, and never echoed back in a response -- including on a
-  validation failure. (FastAPI's default handler for invalid request
-  bodies echoes the raw submitted value for every invalid field; a custom
-  `RequestValidationError` handler in `app/main.py` replaces that with the
-  same `{"error": {code, message, requestId}}` envelope used everywhere
-  else, listing only the field path and message, never the value.)
-- The session cookie is `httponly` (JavaScript cannot read it),
-  `samesite=lax` (not sent on cross-site requests), and `secure` whenever
-  `ENV=production` (see `.env.example` and
-  `apps/api/app/api/v1/routes/auth.py`) -- off for local `http://localhost`
-  development, on for any real deployment.
-- Login and "unknown email" both return the same 401
-  `INVALID_CREDENTIALS` response so the endpoint never reveals which
-  emails have accounts. Duplicate registration returns 409 `EMAIL_TAKEN`.
-- `GET`/`PATCH /workspace` and `PATCH /users/me` resolve "whose workspace"
-  strictly from the authenticated session (no id path parameter exists),
-  so one account can never read or modify another account's workspace.
-- **Known, accepted limitation (ADR-0001):** logout clears the session
-  cookie, ending the browser session immediately, but the underlying JWT
-  is stateless and not server-side revoked -- a copy of the token obtained
-  from a register/login response body (non-browser clients) remains
-  cryptographically valid until its 24h expiry even after logout.
-  Immediate revocation ("log out everywhere") requires a session store,
-  which ADR-0001 explicitly defers past the MVP; this is a frozen
-  trade-off, not an oversight.
-- No secrets are hardcoded. `docker-compose.yml` uses an obviously-labeled
-  local dev database password (`knowledgehub`/`knowledgehub`, local network
-  only); `app/core/config.py`'s `JWT_SECRET` default is named
-  `dev-secret-change-me` specifically so it cannot be mistaken for a real
-  secret -- set a real one via the `JWT_SECRET` environment variable (and
-  `ENV=production`) for anything beyond local development.
-- No debug flags are enabled: no `--reload` in either Dockerfile's `CMD`,
-  no FastAPI debug mode.
-- Both runtime images install only Milestone 1 + Milestone 2 dependencies:
-  the API image installs `requirements.txt` only (no
-  `pytest`/`ruff`/`black`/`PyMuPDF`; the `httpx` present in a `pip list` is
-  a transitive runtime dependency of `qdrant-client`, not the standalone
-  package deferred for the AI-provider milestone); the web image is built
-  with Next.js `output: "standalone"` so the runtime layer excludes
-  `devDependencies` entirely (~23MB vs. ~285MB for a full `node_modules`).
+Everything from Milestone 2's security posture still holds (password
+hashing, session cookie flags, validation-error redaction, workspace
+isolation, no hardcoded secrets, no debug flags, minimal runtime
+dependencies -- see `docs/` history for the full list). New this
+milestone:
+
+- Every document route resolves "whose document" strictly from the
+  authenticated session's workspace (no cross-workspace id guessing is
+  possible); a document that doesn't exist or belongs to another
+  workspace returns the same 404 `DOCUMENT_NOT_FOUND` either way.
+- Upload validates content type, size, and non-emptiness before anything
+  touches disk or the database. `MAX_UPLOAD_MB` is enforced server-side,
+  not just as a client-side UI hint.
+- `workspaces.owner_user_id` was already indexed (Milestone 2 audit);
+  this milestone adds an index on `documents.checksum` for the same
+  reason -- duplicate-detection runs a `(workspace_id, checksum)`
+  lookup on every upload.
+- PyMuPDF's wheel bundles MuPDF statically; empirically verified to need
+  no extra OS packages in the `python:3.11-slim` runtime image for text
+  extraction, so none were added (kept the "runtime images stay
+  dependency-minimal" property from the Milestone 1 audit).
+- `httpx` (imported directly by `app/services/embeddings.py` for the
+  optional OpenAI provider) is now declared explicitly in
+  `requirements.txt` rather than relied upon as a transitive dependency
+  of `qdrant-client`.
 
 ## Running it locally
 
@@ -138,7 +131,9 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 # Falls back to SQLite automatically if DATABASE_URL is unset -- see
 # app/core/config.py. Qdrant reachability will show as "down" in
-# /health/ready unless a Qdrant instance is actually running.
+# /health/ready unless a Qdrant instance is actually running -- ingestion
+# still works in that case, falling back to an in-memory vector store
+# (see app/services/vector_repo.get_vector_repository).
 
 # Frontend (separate terminal)
 cd apps/web
@@ -148,51 +143,39 @@ npm run dev
 
 ## Manual test cases
 
-1. `docker compose up --build`, then open http://localhost:3000. The
-   landing page loads with Login/Register CTAs and the "Live system
-   status" panel shows API, Database, and Vector DB all **Up** within a
-   few seconds.
-2. Click "Sign up", register a new account. You land on `/workspace`
-   signed in, seeing your own workspace name.
-3. Log out, then log back in with the same credentials -- you land on
-   `/workspace` again.
-4. Try registering a second account with the same email -- returns 409
-   `EMAIL_TAKEN`. Try logging in with a wrong password, or an email that
-   was never registered -- both return the same 401
-   `INVALID_CREDENTIALS` (the API never reveals which emails exist).
-5. Try registering with a password under 8 characters -- returns 422 with
-   a `VALIDATION_ERROR` body that names the `password` field but never
-   echoes the submitted value.
-6. Visit `/settings`, change your display name and workspace name, save,
-   then reload -- both changes persisted.
-7. Open a private/incognito window and visit `/workspace` directly
-   without logging in -- you're redirected to `/login`, confirming the
-   route is actually protected server-side, not just hidden in the UI.
-8. Register two different accounts (e.g. in two browser profiles) and
-   confirm each sees only their own workspace name -- never the other
-   account's.
-9. `curl http://localhost:8000/health` returns `{"status":"ok","app":"KnowledgeHub AI"}`.
-10. `curl -i http://localhost:8000/health/ready` returns HTTP 200 with
-    `"status":"ready"` and both components `"up"` while the stack is
-    running.
-11. `docker compose stop qdrant`, then re-run the readiness check: it now
-    returns HTTP 503 with `"status":"degraded"` and
-    `"vector_db":{"status":"down"}`, while `database` still reports `"up"`.
-    `docker compose start qdrant` to restore it.
-12. Visiting a not-yet-built route (e.g. http://localhost:3000/documents
-    or http://localhost:8000/api/v1/documents) returns a 404 -- confirming
-    Milestone 3/4 features are not silently half-available.
-13. `curl -i -H "Origin: http://evil.example" http://localhost:8000/health`
-    -- the response should not include an
-    `Access-Control-Allow-Origin: http://evil.example` header, confirming
-    CORS is restricted to `WEB_ORIGIN`.
+1. `docker compose up --build`, then open http://localhost:3000, register
+   an account, and land on `/workspace`.
+2. Go to Documents -> Upload a PDF. The upload returns immediately and the
+   document shows as processing; within a few seconds it reaches
+   **Ready** with a real page count.
+3. Open the ready document's detail page -- it shows the page count and a
+   note that asking questions about it arrives in Milestone 4 (no dead
+   link to a chat screen that doesn't exist yet).
+4. Try uploading the exact same PDF again -- rejected with 409
+   `DUPLICATE_DOCUMENT`. Try uploading a `.txt` file -- rejected with 422
+   `UNSUPPORTED_FILE_TYPE`. Try uploading an empty file -- rejected with
+   422 `EMPTY_FILE`.
+5. Upload a PDF with no extractable text (e.g. export a blank page to
+   PDF) -- it reaches **Failed** with a clear "appears to be a scanned
+   image" message, not a silent empty index. Click "Retry Processing" --
+   it fails again the same way, deterministically.
+6. Delete a document from the library -- it disappears from the list
+   immediately; re-uploading the same file afterward succeeds (no longer
+   a duplicate).
+7. Register a second, separate account and confirm it cannot see, open,
+   download, or delete the first account's documents (404 either way).
+8. `curl http://localhost:8000/health` and `/health/ready` still behave
+   exactly as in Milestone 1/2 (see those milestones' test cases).
+9. Visiting a not-yet-built route (e.g. http://localhost:3000/chat or
+   http://localhost:8000/api/v1/conversations) still returns a 404,
+   confirming Milestone 4 is not silently half-available.
 
 ## Testing
 
 ```bash
 cd apps/api
 pip install -r requirements-dev.txt
-pytest -q      # 22 passed, 2 skipped (deferred to Milestone 3)
+pytest -q      # 36 passed, 3 skipped (deferred to Milestone 4)
 ruff check app tests
 black --check app tests
 ```
@@ -206,30 +189,28 @@ npm run build
 
 ## Assumptions
 
-- PostgreSQL and Qdrant are treated as hard dependencies (readiness fails
-  without them); there is no in-memory fallback in this milestone, unlike
-  in the earlier prototype.
-- The health check for the Qdrant container itself is intentionally
-  omitted from `docker-compose.yml` because its base image does not
-  reliably provide a shell utility to probe it with; the API's own
-  `/health/ready` is the authoritative check instead (see the comment in
-  `docker-compose.yml`).
-- No `.env` values are required to run `docker compose up`; `.env.example`
-  documents the overrides available for running services outside Docker,
-  including `JWT_SECRET` and `ENV` (introduced this milestone).
-- `app/core/config.py` declares settings fields for later milestones
-  (storage, embedding/LLM provider) with safe, clearly-fake defaults.
-  This is deliberate -- see `apps/api/app/README.md` -- and none of those
-  fields are read by any code path that runs in Milestone 1 or 2.
-- `GET /workspace` intentionally omits document counts (`stats`) until
-  Milestone 3 introduces the `Document` model -- see that route's
-  docstring in `apps/api/app/api/v1/routes/workspace.py`.
-- Logout does not server-side revoke the JWT (see Security above); this is
-  an accepted MVP trade-off per ADR-0001, not a gap to close in this
-  milestone.
+- Ingestion runs as an in-process FastAPI `BackgroundTask`, not a
+  separate worker queue (ADR-0005). If the API process crashes mid-job,
+  that document's `IngestionJob` row is left `RUNNING` and the document
+  stays `PROCESSING` forever until manually retried or cleaned up --
+  acceptable for local/demo use, not yet a production guarantee.
+- No OCR: PDFs with no extractable text layer fail with
+  `SCANNED_PDF_UNSUPPORTED` rather than being processed (ADR-0006).
+- The zero-config default embedding provider (`LocalHashEmbeddingProvider`)
+  is lexical (hashed bag-of-words), not deep-semantic -- it rewards
+  vocabulary overlap between a query and a chunk, which is sufficient for
+  the seeded demo corpus and this milestone's scope (there is no query
+  path yet to evaluate retrieval quality against). Swapping to
+  `EMBEDDING_PROVIDER=openai` is a config change, not a code change.
+- Uploaded files are stored on local disk (`STORAGE_DIR`, ADR-0007)
+  inside a named Docker volume (`api_storage`) so they survive container
+  rebuilds; they are not yet backed by S3 or any object store.
+- `GET /workspace` still does not return a `stats` field -- see
+  `apps/api/app/README.md` for why that's a deliberate scope choice, not
+  an oversight.
 - Schema changes still use `Base.metadata.create_all` rather than Alembic
-  migrations (see `docs/adr/0008`); acceptable while there's no production
-  data yet to migrate around.
+  migrations (ADR-0008); acceptable while there's no production data yet
+  to migrate around.
 
 ## Repository layout
 
@@ -238,19 +219,26 @@ knowledgehub-ai/
 ├── apps/
 │   ├── api/
 │   │   ├── app/
-│   │   │   ├── README.md                 # module -> milestone map
-│   │   │   ├── api/routes/health.py       # Milestone 1 -- live
-│   │   │   ├── api/v1/routes/auth.py      # Milestone 2 -- live
-│   │   │   ├── api/v1/routes/workspace.py # Milestone 2 -- live
-│   │   │   ├── api/v1/routes/documents.py, chat.py  # Milestones 3-4 -- not mounted
-│   │   │   ├── core/, db/, models/, services/, schemas/
+│   │   │   ├── README.md                  # module -> milestone map
+│   │   │   ├── api/routes/health.py        # Milestone 1 -- live
+│   │   │   ├── api/v1/routes/auth.py       # Milestone 2 -- live
+│   │   │   ├── api/v1/routes/workspace.py  # Milestone 2 -- live
+│   │   │   ├── api/v1/routes/documents.py  # Milestone 3 -- live
+│   │   │   ├── api/v1/routes/chat.py       # Milestone 4 -- not mounted
+│   │   │   ├── services/storage.py, extraction.py, chunking.py,
+│   │   │   │   ingestion_service.py        # Milestone 3 -- live
+│   │   │   ├── services/embeddings.py, vector_repo.py  # write path:
+│   │   │   │   Milestone 3 -- live; read path: Milestone 4 -- not used
+│   │   │   ├── services/llm.py, retrieval_service.py    # Milestone 4
+│   │   │   ├── core/, db/, models/, schemas/
 │   │   │   └── main.py
 │   │   └── tests/
 │   └── web/
 │       ├── app/
-│       │   ├── page.tsx, layout.tsx       # Milestone 1 -- live
-│       │   ├── login/, register/, workspace/, settings/  # Milestone 2 -- live
-│       │   └── _future/documents/, _future/chat/          # Milestones 3-4 -- not routed
+│       │   ├── page.tsx, layout.tsx        # Milestone 1 -- live
+│       │   ├── login/, register/, workspace/, settings/  # Milestone 2
+│       │   ├── documents/                  # Milestone 3 -- live
+│       │   └── _future/chat/               # Milestone 4 -- not routed
 │       ├── components/, lib/
 ├── docs/
 │   ├── adr/            # architecture decision records
@@ -265,8 +253,8 @@ knowledgehub-ai/
 | Milestone | Scope | Status |
 |---|---|---|
 | 1 | Project foundation: monorepo, Docker Compose, Postgres, Qdrant, health checks | Frozen (`v0.1.0-foundation`) |
-| 2 | Authentication + workspace | **Current** |
-| 3 | Document upload + ingestion pipeline | Not started |
+| 2 | Authentication + workspace | Frozen (`v0.2.0-authentication`) |
+| 3 | Document upload + ingestion pipeline | **Current** |
 | 4 | RAG chat with page-level citations | Not started |
 | 5 | Source Viewer + UX polish | Not started |
 | 6 | Portfolio release: seed data, docs, demo | Not started |

@@ -1,9 +1,9 @@
-# Milestone 1 + Milestone 2 image. Only requirements.txt is installed --
-# no dev tooling (pytest/ruff/black/httpx-the-package, as opposed to the
-# httpx pulled in transitively by qdrant-client), and no OS packages for
-# not-yet-installed future dependencies. PyMuPDF's rendering libraries
-# (libglib2.0-0, libgl1) are intentionally not installed here; they belong
-# in the Milestone 3 update to this Dockerfile, alongside PyMuPDF itself.
+# Milestone 1 + Milestone 2 + Milestone 3 image. Only requirements.txt is
+# installed -- no dev tooling (pytest/ruff/black). PyMuPDF's wheel bundles
+# MuPDF statically; empirically verified (see Milestone 3 verification) to
+# need no extra OS packages for text extraction on python:3.11-slim, so
+# none are added here. If a later milestone renders PDF pages as images
+# (thumbnails, OCR), revisit this -- that path can need libgl1/libglib2.0-0.
 FROM python:3.11-slim
 
 WORKDIR /app

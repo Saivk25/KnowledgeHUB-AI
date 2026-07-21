@@ -1,10 +1,10 @@
 # KnowledgeHub AI -- local development stack.
 #
-# Milestone 1 + Milestone 2 scope: Postgres, Qdrant, the API, and the web
-# app all start and can prove they are wired together via health checks;
-# the API also serves real authentication (register/login/logout/me) and
-# workspace routes. AI provider keys and storage paths are added in the
-# docker-compose update that ships alongside the milestone that needs them.
+# Milestone 1 + Milestone 2 + Milestone 3 scope: Postgres, Qdrant, the API,
+# and the web app all start and can prove they are wired together via
+# health checks; the API serves authentication, workspace, and document
+# upload/ingestion routes. RAG chat/retrieval is added in the milestone
+# that needs it.
 #
 # Decision: Docker Compose, not Kubernetes.
 # Why: a single `docker compose up` reproduces the entire stack for a
@@ -25,6 +25,13 @@
 # default -- correct for this local-only stack. Set a real JWT_SECRET (and
 # ENV=production, which also makes the session cookie Secure) via a real
 # deployment's own environment, never by editing this default.
+#
+# Note on the api_storage volume (Milestone 3): uploaded PDFs are saved to
+# STORAGE_DIR (app/services/storage.py, ADR-0007) inside the container. A
+# named volume keeps them across `docker compose down`/rebuilds, same as
+# postgres_data/qdrant_data already do for their services -- without it,
+# every rebuild would silently orphan already-ingested files (the DB row
+# and Qdrant vectors would still exist, but GET .../file would 404).
 version: "3.9"
 
 services:
@@ -66,8 +73,11 @@ services:
       DATABASE_URL: postgresql://knowledgehub:knowledgehub@postgres:5432/knowledgehub
       QDRANT_URL: http://qdrant:6333
       WEB_ORIGIN: http://localhost:3000
+      STORAGE_DIR: /app/storage
     ports:
       - "8000:8000"
+    volumes:
+      - api_storage:/app/storage
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 10s
@@ -96,3 +106,4 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  api_storage:

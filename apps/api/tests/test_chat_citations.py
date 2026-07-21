@@ -2,17 +2,23 @@
 Deferred to Milestone 4 (RAG Chat + Citations).
 
 These tests exercise the `/api/v1/conversations` router and the retrieval
-pipeline, neither of which exist in Milestone 1 (Project Foundation).
-`pytest.importorskip` means this module cleanly skips in the Milestone 1
-environment (no PyMuPDF installed). Re-enable once auth, ingestion, and
-chat routers are wired into app/main.py.
+pipeline. As of Milestone 3, PyMuPDF is installed and the ingestion
+pipeline these tests depend on for setup (_upload_ready_document) works
+fine -- the actual blocker is that `chat.router` is not mounted in
+app/api/v1/router.py yet (see that file's docstring), so every request
+here would 404 rather than exercising real behavior. `pytest.mark.skip`
+below is unconditional and explicit about that, replacing the old
+`importorskip("fitz")` guard from Milestone 1/2, which stopped being
+accurate the moment PyMuPDF was installed for Milestone 3 -- it was
+skipping for the wrong reason. Remove the skip once the chat and
+retrieval routers are wired in for Milestone 4.
 """
 
 import pytest
 
-pytest.importorskip("fitz", reason="PyMuPDF is a Milestone 3 dependency, not installed in Milestone 1")
+from tests.pdf_helpers import make_sample_pdf
 
-from tests.pdf_helpers import make_sample_pdf  # noqa: E402
+pytestmark = pytest.mark.skip(reason="Milestone 4: chat router is not mounted yet (see app/api/v1/router.py)")
 
 POLICY_TEXT = "The expense approval threshold for department managers is five thousand dollars per request."
 

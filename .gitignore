@@ -5,6 +5,7 @@ __pycache__/
 apps/api/storage/
 apps/api/*.db
 apps/api/.env
+apps/api/.venv/
 
 # Node
 node_modules/

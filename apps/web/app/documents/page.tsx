@@ -115,10 +115,14 @@ export default function DocumentLibraryPage() {
                       <StatusBadge status={doc.status} />
                     </td>
                     <td className="px-4 py-3 text-right">
+                      {/* Milestone 3 (Document Ingestion): "Ask About This" intentionally does not
+                          link to /chat -- that route isn't mounted until Milestone 4 (RAG Chat).
+                          A ready, indexed document is the Milestone 3 deliverable; asking questions
+                          about it is the next milestone's, not this page's, job. */}
                       {doc.status === "READY" && (
-                        <Link href="/chat" className="mr-3 text-xs font-medium text-indigo hover:underline">
-                          Ask About This
-                        </Link>
+                        <span className="mr-3 text-xs font-medium text-slate-400" title="AI Chat arrives in Milestone 4">
+                          Indexed
+                        </span>
                       )}
                       <button
                         onClick={() => onDelete(doc.id)}

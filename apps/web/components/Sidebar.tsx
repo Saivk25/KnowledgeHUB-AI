@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
-// Milestone 2 (Authentication) scope: only routes that are actually mounted
-// belong here. "AI Chat" (/chat), "Documents" (/documents), and "Upload
-// Document" (/documents/upload) are prototyped under app/_future/ but not
-// routable until Milestones 3-4 -- linking to them here would produce a
-// 404. Add them back to this list in the milestone that ships each route.
+// Milestone 3 (Document Ingestion) scope: Documents and Upload Document
+// are now live routes. "AI Chat" (/chat) is prototyped under app/_future/
+// but not routable until Milestone 4 -- linking to it here would produce
+// a 404. Add it back to this list in the milestone that ships it.
 const NAV_ITEMS = [
   { href: "/workspace", label: "Workspace Home", icon: "home" },
+  { href: "/documents", label: "Documents", icon: "docs" },
+  { href: "/documents/upload", label: "Upload Document", icon: "upload" },
   { href: "/settings", label: "Settings", icon: "settings" },
 ];
 

@@ -1,3 +1,18 @@
+"""
+Document upload and ingestion routes (Milestone 3).
+
+Scope: upload, list, detail (with processing-job status), retry, file
+download, and delete. Ingestion itself (extract -> chunk -> embed -> index)
+runs in app/services/ingestion_service.py as a FastAPI BackgroundTask (see
+ADR-0005) so the upload request returns immediately with status=QUEUED and
+the client polls GET /documents/{id} for progress.
+
+Retrieval, chat, and citations are explicitly out of scope here -- see
+Milestone 4. Nothing in this module reads from the vector store; it only
+writes to it (upsert on ingest, delete on document delete), so Milestone 4
+can add a read-only search path without changing anything in this file.
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, status
@@ -31,7 +46,22 @@ def _to_out(document: Document) -> DocumentOut:
     )
 
 
-@router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=DocumentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a PDF for ingestion",
+    description=(
+        "Accepts a single PDF (application/pdf, up to MAX_UPLOAD_MB). "
+        "Returns immediately with status=QUEUED -- extraction, chunking, "
+        "embedding, and vector indexing run in the background (see "
+        "app/services/ingestion_service.py). Poll GET /documents/{id} for "
+        "progress. Rejects non-PDF files (422 UNSUPPORTED_FILE_TYPE), empty "
+        "files (422 EMPTY_FILE), oversized files (413 FILE_TOO_LARGE), and "
+        "exact re-uploads of a file already in this workspace, by content "
+        "checksum (409 DUPLICATE_DOCUMENT)."
+    ),
+)
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile,
@@ -100,7 +130,14 @@ def _run_ingestion(document_id: str) -> None:
         db.close()
 
 
-@router.get("", response_model=DocumentListOut)
+@router.get(
+    "",
+    response_model=DocumentListOut,
+    summary="List documents in the current workspace",
+    description=(
+        "Protected route. Returns only documents belonging to the " "caller's own workspace, newest first."
+    ),
+)
 def list_documents(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
@@ -114,7 +151,17 @@ def list_documents(
     return DocumentListOut(items=[_to_out(d) for d in documents], nextCursor=None)
 
 
-@router.get("/{document_id}", response_model=DocumentDetailOut)
+@router.get(
+    "/{document_id}",
+    response_model=DocumentDetailOut,
+    summary="Get a document and its processing status",
+    description=(
+        "Returns 404 DOCUMENT_NOT_FOUND if the document doesn't exist or "
+        "belongs to a different workspace -- the two cases are "
+        "indistinguishable to the caller, same as every other "
+        "workspace-scoped lookup in this API."
+    ),
+)
 def get_document(
     document_id: str,
     workspace: Workspace = Depends(get_current_workspace),
@@ -134,20 +181,20 @@ def get_document(
     return DocumentDetailOut(document=_to_out(document), processingJob=job_out)
 
 
-@router.get("/{document_id}/file")
+@router.get(
+    "/{document_id}/file",
+    summary="Download the original PDF",
+    description=(
+        "Streams the original PDF bytes. Authorized the same way as every "
+        "other document route (workspace ownership check) -- there is no "
+        "separate signed-URL mechanism in this milestone."
+    ),
+)
 def get_document_file(
     document_id: str,
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    """
-    Streams the original PDF so the Source Viewer can embed it and jump to
-    the cited page. This route is authorized the same way as every other
-    document route (workspace ownership check) -- the browser's iframe
-    request carries the same-site auth cookie automatically, so no signed
-    URL is needed for the local MVP. Swapping storage to S3 later replaces
-    this with a short-lived pre-signed redirect (see ADR-0007).
-    """
     document = db.get(Document, document_id)
     if not document or document.workspace_id != workspace.id:
         raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
@@ -157,7 +204,16 @@ def get_document_file(
     return FileResponse(path, media_type="application/pdf", filename=document.filename)
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a document",
+    description=(
+        "Removes the document's DB rows (pages, chunks, ingestion jobs -- "
+        "cascade delete), its vector points in Qdrant, and its stored file. "
+        "Irreversible."
+    ),
+)
 def delete_document(
     document_id: str,
     workspace: Workspace = Depends(get_current_workspace),
@@ -179,7 +235,12 @@ def delete_document(
     return None
 
 
-@router.post("/{document_id}/retry", response_model=DocumentOut)
+@router.post(
+    "/{document_id}/retry",
+    response_model=DocumentOut,
+    summary="Retry a failed document",
+    description="Only documents in FAILED status can be retried (409 DOCUMENT_NOT_FAILED otherwise).",
+)
 def retry_document(
     background_tasks: BackgroundTasks,
     document_id: str,
