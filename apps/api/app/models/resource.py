@@ -45,13 +45,18 @@ What changed vs. Document, and why:
    error path, since turning a duplicate-content signal into a blocking
    product behavior is a product decision outside this milestone's approved
    scope (schema + Alembic only).
+
+Milestone 5 addition: `extraction_confidence` (nullable float). Added by
+migration 0003 once Multi-Format Ingestion introduced a format (image OCR)
+whose extraction confidence is genuinely less than 1.0 -- see the field's
+own inline comment below and docs/adr/0012-multi-format-extraction.md.
 """
 
 from __future__ import annotations
 
 import hashlib
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -124,6 +129,16 @@ class Resource(Base, UUIDPK, TimestampMixin):
     page_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=ResourceStatus.QUEUED)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Milestone 5: the extractor's own reported confidence for this
+    # resource's extracted text (0.0-1.0). 1.0 for every deterministic
+    # parser (PDF/DOCX/PPTX/TXT/MD/code); only image OCR ever reports below
+    # 1.0, and always the OCR engine's real score (see
+    # app/services/extraction.py, docs/adr/0012-multi-format-extraction.md).
+    # Nullable: unset until extraction completes, same lifecycle as
+    # text_hash. Stored now, not yet surfaced in the API response -- the
+    # confidence UX itself is Roadmap Milestone 10/11's job.
+    extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     pages = relationship("ResourcePage", back_populates="resource", cascade="all, delete-orphan")
     chunks = relationship("ResourceChunk", back_populates="resource", cascade="all, delete-orphan")

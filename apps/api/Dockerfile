@@ -1,13 +1,20 @@
-# Milestone 1 + Milestone 2 + Milestone 3 + Milestone 4 image. Only
-# requirements.txt is installed -- no dev tooling (pytest/ruff/black).
-# PyMuPDF's wheel bundles MuPDF statically; empirically verified (see
-# Milestone 3 verification) to need no extra OS packages for text extraction
-# on python:3.11-slim, so none are added here. If a later milestone renders
-# PDF pages as images (thumbnails, OCR), revisit this -- that path can need
-# libgl1/libglib2.0-0.
+# Milestone 1 + 2 + 3 + 4 + 5 image. Only requirements.txt is installed --
+# no dev tooling (pytest/ruff/black). PyMuPDF's wheel bundles MuPDF
+# statically, so PDF extraction needs no extra OS packages.
+#
+# Milestone 5 (Multi-Format Ingestion) adds one real OS-level dependency:
+# the `tesseract-ocr` system package, required by pytesseract for image OCR
+# (app/services/extraction.py's ImageOcrExtractor). This is the first
+# departure from "pure Python wheels only" in this image, landing exactly in
+# the milestone that needs it, per this project's established dependency
+# discipline (see app/README.md).
 FROM python:3.11-slim
 
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

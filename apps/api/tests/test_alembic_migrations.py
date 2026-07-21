@@ -1,5 +1,7 @@
 """
-Milestone 4: Alembic migration chain integrity.
+Milestone 4: Alembic migration chain integrity. Milestone 5 extended
+EXPECTED_RESOURCE_COLUMNS with `extraction_confidence` (migration
+0003_extraction_confidence) -- see that migration's docstring.
 
 These tests exist because conftest.py's autouse fixture already runs
 `alembic upgrade head` for every other test in this suite (see conftest.py's
@@ -52,9 +54,18 @@ EXPECTED_RESOURCE_COLUMNS = {
     "page_count",
     "status",
     "error_message",
+    "extraction_confidence",
 }
 
-NULLABLE_RESOURCE_COLUMNS = {"filename", "storage_key", "mime_type", "size_bytes", "checksum", "text_hash"}
+NULLABLE_RESOURCE_COLUMNS = {
+    "filename",
+    "storage_key",
+    "mime_type",
+    "size_bytes",
+    "checksum",
+    "text_hash",
+    "extraction_confidence",
+}
 
 
 @pytest.fixture

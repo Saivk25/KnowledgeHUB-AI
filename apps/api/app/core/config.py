@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
+    # -- Milestone 5 (Multi-Format Ingestion) -- read by
+    # app/services/extraction.py's ImageOcrExtractor whenever an image is
+    # ingested. Left unset by default: on Linux (Docker, per the Dockerfile's
+    # tesseract-ocr apt package) pytesseract finds the `tesseract` binary on
+    # PATH with no configuration. Set this only for local Windows development
+    # where Tesseract isn't on PATH (e.g. the default UB-Mannheim installer
+    # path, `C:\Program Files\Tesseract-OCR\tesseract.exe`).
+    TESSERACT_CMD: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

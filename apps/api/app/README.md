@@ -86,3 +86,24 @@ imported the old `Document` model -- including the still-dormant
 to import `Resource` instead, so the "Mounted in app.main today?" column
 above stays accurate without any dormant module also being a landmine
 against a model that no longer exists.
+
+## Milestone 5 note (Multi-Format Ingestion, per the roadmap's own numbering)
+
+`services/extraction.py` is no longer one PyMuPDF-only function -- it is an
+`Extractor` registry (`PdfExtractor`, `DocxExtractor`, `PptxExtractor`,
+`TextExtractor`, `CodeExtractor`, `ImageOcrExtractor`), resolved by file
+extension, all returning the same `ExtractionResult` contract. See
+`docs/adr/0012-multi-format-extraction.md` for why each format was built the
+way it was (OCR engine choice, code-file allowlist, YouTube-as-virtual-file).
+New module `services/youtube.py` fetches a YouTube video's transcript and
+hands it to the same upload pipeline via `POST /documents/youtube` --
+`api/v1/routes/documents.py` gained this one new route; every other route on
+that file is unchanged. `models/resource.py` gained one new nullable column,
+`extraction_confidence` (migration `0003_extraction_confidence`), populated
+by every extractor (1.0 except image OCR, which reports Tesseract's real
+per-word confidence) -- stored now, not yet surfaced in the API response
+(that's Roadmap Milestone 10/11's job). New runtime dependencies
+(`python-docx`, `python-pptx`, `pytesseract`, `Pillow`,
+`youtube-transcript-api`, plus the `tesseract-ocr` system package in the
+Dockerfile) all landed in this milestone specifically because this is the
+first milestone that needs them, continuing the discipline described above.

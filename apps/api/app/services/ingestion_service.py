@@ -20,6 +20,18 @@ resource's full text is known, populating the Resource-level content dedup
 field. This does not add a new rejection path (see resource.py's docstring
 for why) -- it only makes the column meaningful rather than a dead nullable
 field.
+
+Milestone 5 update: extraction is no longer a hardcoded PyMuPDF call --
+`get_extractor_for(resource.filename)` resolves the right Extractor from the
+registry in app/services/extraction.py, so this function does not need to
+know or care which of the six supported formats a given resource is.
+`ExtractionError` (raised by an extractor on a corrupt/unreadable file) is
+caught here and mapped to a FAILED status via `_fail`, the same pattern
+already used for SCANNED_PDF_UNSUPPORTED. The `looks_scanned` check remains
+PDF-specific -- it means "this PDF has no extractable text, i.e. it is
+probably a scanned image" (ADR-0006), a check that doesn't make sense for
+any other format. `resource.extraction_confidence` is populated from the
+extractor's result for every format, not only OCR (see resource.py).
 """
 
 from __future__ import annotations
@@ -34,7 +46,7 @@ from app.models.ingestion_job import IngestionJob, IngestionStep
 from app.models.resource import Resource, ResourceChunk, ResourcePage, ResourceStatus, compute_text_hash
 from app.services.chunking import chunk_pages
 from app.services.embeddings import get_embedding_provider
-from app.services.extraction import extract_text
+from app.services.extraction import ExtractionError, get_extractor_for
 from app.services.storage import get_storage
 from app.services.vector_repo import VectorPoint, get_vector_repository, new_point_id
 
@@ -69,10 +81,23 @@ def process_document(db: Session, resource_id: str) -> None:
         db.commit()
 
         storage = get_storage()
-        pdf_path = storage.path_for(resource.storage_key)
-        result = extract_text(pdf_path)
+        file_path = storage.path_for(resource.storage_key)
 
-        if result.looks_scanned:
+        extractor = get_extractor_for(resource.filename)
+        if extractor is None:
+            # Defensive only -- the upload route (and the youtube endpoint,
+            # which always saves a .txt file) already validate against the
+            # same registry, so this should be unreachable in practice.
+            _fail("UNSUPPORTED_FILE_TYPE", "This file type is not supported.")
+            return
+
+        try:
+            result = extractor.extract(file_path)
+        except ExtractionError as exc:
+            _fail(exc.code, exc.message)
+            return
+
+        if resource.mime_type == "application/pdf" and result.looks_scanned:
             _fail(
                 "SCANNED_PDF_UNSUPPORTED",
                 "This PDF appears to be a scanned image without extractable text. "
@@ -96,6 +121,10 @@ def process_document(db: Session, resource_id: str) -> None:
         # not yet used to reject uploads (out of this milestone's scope).
         full_text = "\n".join(text for _, text in result.pages)
         resource.text_hash = compute_text_hash(full_text)
+
+        # Extraction confidence (Milestone 5) -- see resource.py's field
+        # comment. 1.0 for every format except image OCR.
+        resource.extraction_confidence = result.confidence
         db.commit()
 
         if job:

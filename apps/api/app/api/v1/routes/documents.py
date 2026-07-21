@@ -16,6 +16,18 @@ is the Resource schema + Alembic only, not an API surface change. Every
 resource created through this route is content_source=FILE; there is no
 route here (or anywhere yet) that creates a CAPTURE resource.
 
+Milestone 5 note (Multi-Format Ingestion): `upload_document` now validates
+against the Extractor registry's supported-extension allowlist
+(app/services/extraction.py) instead of a hardcoded PDF-only check, and sets
+`mime_type` from the real detected format instead of hardcoding
+"application/pdf". A new endpoint, `POST /documents/youtube`, accepts a
+YouTube URL and creates a resource the same way: it fetches the transcript,
+saves it as a plain .txt file through the same storage service, and creates
+an ordinary content_source=FILE resource -- there is no second ingestion
+pipeline, no new status machine, and no new content_source value (see
+app/services/youtube.py and docs/adr/0012-multi-format-extraction.md). Every
+other route on this file (list/get/file/delete/retry) is unchanged.
+
 Retrieval, chat, and citations are explicitly out of scope here -- see
 Milestone 4 (RAG Chat, per app/README.md's milestone numbering -- unrelated
 to "Milestone 4" in the product roadmap sense used elsewhere in this repo).
@@ -35,13 +47,27 @@ from app.deps import AppError, get_current_workspace
 from app.models.ingestion_job import IngestionJob
 from app.models.resource import Resource, ResourceContentSource, ResourceStatus
 from app.models.workspace import Workspace
-from app.schemas.document import DocumentDetailOut, DocumentListOut, DocumentOut, IngestionJobOut
+from app.schemas.document import (
+    DocumentDetailOut,
+    DocumentListOut,
+    DocumentOut,
+    IngestionJobOut,
+    YoutubeIngestRequest,
+)
+from app.services.extraction import SUPPORTED_EXTENSIONS, is_supported_filename, mime_type_for
 from app.services.ingestion_service import process_document
 from app.services.storage import get_storage
 from app.services.vector_repo import get_vector_repository
+from app.services.youtube import (
+    InvalidYoutubeUrlError,
+    TranscriptUnavailableError,
+    extract_video_id,
+    fetch_transcript,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 settings = get_settings()
+_SUPPORTED_EXTENSIONS_LABEL = ", ".join(sorted(SUPPORTED_EXTENSIONS))
 
 
 def _to_out(resource: Resource) -> DocumentOut:
@@ -60,15 +86,16 @@ def _to_out(resource: Resource) -> DocumentOut:
     "",
     response_model=DocumentOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload a PDF for ingestion",
+    summary="Upload a document for ingestion",
     description=(
-        "Accepts a single PDF (application/pdf, up to MAX_UPLOAD_MB). "
+        "Accepts a PDF, DOCX, PPTX, TXT/Markdown, a source code file, or an "
+        "image (PNG/JPG, run through OCR), up to MAX_UPLOAD_MB. "
         "Returns immediately with status=QUEUED -- extraction, chunking, "
         "embedding, and vector indexing run in the background (see "
         "app/services/ingestion_service.py). Poll GET /documents/{id} for "
-        "progress. Rejects non-PDF files (422 UNSUPPORTED_FILE_TYPE), empty "
-        "files (422 EMPTY_FILE), oversized files (413 FILE_TOO_LARGE), and "
-        "exact re-uploads of a file already in this workspace, by content "
+        "progress. Rejects unsupported file types (422 UNSUPPORTED_FILE_TYPE), "
+        "empty files (422 EMPTY_FILE), oversized files (413 FILE_TOO_LARGE), "
+        "and exact re-uploads of a file already in this workspace, by content "
         "checksum (409 DUPLICATE_DOCUMENT)."
     ),
 )
@@ -78,11 +105,11 @@ async def upload_document(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    if file.content_type not in ("application/pdf",) and not file.filename.lower().endswith(".pdf"):
+    if not is_supported_filename(file.filename or ""):
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "UNSUPPORTED_FILE_TYPE",
-            "Only PDF files are supported in this release.",
+            f"Unsupported file type. Supported extensions: {_SUPPORTED_EXTENSIONS_LABEL}.",
         )
 
     content = await file.read()
@@ -114,7 +141,78 @@ async def upload_document(
         content_source=ResourceContentSource.FILE,
         filename=file.filename,
         storage_key=storage_key,
-        mime_type="application/pdf",
+        mime_type=mime_type_for(file.filename),
+        size_bytes=len(content),
+        checksum=checksum,
+        status=ResourceStatus.QUEUED,
+    )
+    db.add(resource)
+    db.flush()
+
+    job = IngestionJob(resource_id=resource.id, status="PENDING")
+    db.add(job)
+    db.commit()
+
+    background_tasks.add_task(_run_ingestion, resource.id)
+
+    return _to_out(resource)
+
+
+@router.post(
+    "/youtube",
+    response_model=DocumentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingest a YouTube video's transcript",
+    description=(
+        "Accepts a youtube.com/youtu.be video URL (422 INVALID_YOUTUBE_URL "
+        "for anything else -- this never fetches an arbitrary URL, only the "
+        "transcript for a validated video ID). Fetches the transcript (422 "
+        "TRANSCRIPT_UNAVAILABLE if the video has none), saves it as a plain "
+        "text file, and ingests it through the exact same pipeline as any "
+        "other upload -- same status machine, same GET /documents/{id} "
+        "polling, same retry/delete routes."
+    ),
+)
+async def ingest_youtube_video(
+    background_tasks: BackgroundTasks,
+    body: YoutubeIngestRequest,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: Session = Depends(get_db),
+):
+    try:
+        video_id = extract_video_id(body.url)
+    except InvalidYoutubeUrlError as exc:
+        raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "INVALID_YOUTUBE_URL", str(exc)) from exc
+
+    try:
+        transcript = fetch_transcript(video_id)
+    except TranscriptUnavailableError as exc:
+        raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "TRANSCRIPT_UNAVAILABLE", str(exc)) from exc
+
+    content = transcript.encode("utf-8")
+    filename = f"youtube_{video_id}.txt"
+
+    storage = get_storage()
+    storage_key, checksum = storage.save(workspace.id, filename, content)
+
+    existing = (
+        db.query(Resource)
+        .filter(Resource.workspace_id == workspace.id, Resource.checksum == checksum)
+        .first()
+    )
+    if existing:
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "DUPLICATE_DOCUMENT",
+            "This video's transcript has already been ingested.",
+        )
+
+    resource = Resource(
+        workspace_id=workspace.id,
+        content_source=ResourceContentSource.FILE,
+        filename=filename,
+        storage_key=storage_key,
+        mime_type="text/plain",
         size_bytes=len(content),
         checksum=checksum,
         status=ResourceStatus.QUEUED,

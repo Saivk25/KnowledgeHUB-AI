@@ -170,6 +170,10 @@ export const api = {
   retryDocument: (id: string) => request<DocumentOut>(`/api/v1/documents/${id}/retry`, { method: "POST" }),
   fileUrl: (id: string) => `${API_URL}/api/v1/documents/${id}/file`,
 
+  // Milestone 5 -- multi-format ingestion -- live
+  ingestYoutubeVideo: (url: string) =>
+    request<DocumentOut>("/api/v1/documents/youtube", { method: "POST", body: JSON.stringify({ url }) }),
+
   // Milestone 4 -- chat (not mounted yet)
   createConversation: () => request<{ id: string; title: string }>("/api/v1/conversations", { method: "POST", body: JSON.stringify({}) }),
   getConversation: (id: string) =>

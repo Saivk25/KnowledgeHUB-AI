@@ -8,6 +8,11 @@ QDRANT_URL at an unreachable port on purpose -- see get_vector_repository's
 fallback). No mocks of the ingestion logic itself: TestClient runs
 BackgroundTasks synchronously, so by the time an upload response comes
 back, ingestion has already finished.
+
+Milestone 5 note: one test below (`test_unsupported_file_type_upload_is_rejected`)
+was updated from its Milestone 3 form, since the supported-format allowlist
+grew from PDF-only to six formats -- see test_multi_format_ingestion.py for
+the new formats' own end-to-end coverage.
 """
 
 from tests.pdf_helpers import make_sample_pdf
@@ -90,14 +95,18 @@ def test_scanned_pdf_with_no_text_fails_with_clear_error(registered_client, tmp_
     assert detail["processingJob"]["errorCode"] == "SCANNED_PDF_UNSUPPORTED"
 
 
-def test_non_pdf_upload_is_rejected(registered_client, tmp_path):
+def test_unsupported_file_type_upload_is_rejected(registered_client, tmp_path):
+    """Milestone 5 note: .txt is a supported format as of this milestone
+    (see test_multi_format_ingestion.py) -- this test was updated from
+    Milestone 3's ".txt is rejected" case to a genuinely unsupported
+    extension, since the registry's allowlist grew, not shrank."""
     client, _ = registered_client
-    txt_path = tmp_path / "notes.txt"
-    txt_path.write_text("not a pdf")
-    with open(txt_path, "rb") as f:
+    archive_path = tmp_path / "notes.zip"
+    archive_path.write_bytes(b"not a real zip file")
+    with open(archive_path, "rb") as f:
         resp = client.post(
             "/api/v1/documents",
-            files={"file": ("notes.txt", f, "text/plain")},
+            files={"file": ("notes.zip", f, "application/zip")},
         )
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "UNSUPPORTED_FILE_TYPE"
