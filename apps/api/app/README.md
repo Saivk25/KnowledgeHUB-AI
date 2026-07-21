@@ -18,7 +18,7 @@ is never ambiguous from a directory listing alone.
 | `models/user.py`, `models/workspace.py` | 2 -- Authentication | **Yes** |
 | `schemas/auth.py` | 2 -- Authentication | **Yes** |
 | `api/v1/routes/auth.py`, `api/v1/routes/workspace.py` | 2 -- Authentication | **Yes** |
-| `models/document.py`, `models/ingestion_job.py` | 3 -- Document Ingestion | **Yes** |
+| `models/resource.py` (renamed from `models/document.py` in Milestone 4 -- see `docs/adr/0011-resource-content-model.md`), `models/ingestion_job.py` | 3 -- Document Ingestion | **Yes** |
 | `services/storage.py`, `services/extraction.py`, `services/chunking.py`, `services/ingestion_service.py` | 3 -- Document Ingestion | **Yes** |
 | `services/embeddings.py` (embed/write path), `services/vector_repo.py` (upsert/delete) | 3 -- Document Ingestion | **Yes** |
 | `schemas/document.py`, `api/v1/routes/documents.py` | 3 -- Document Ingestion | **Yes** |
@@ -71,3 +71,18 @@ are worth being explicit about:
 To activate a milestone: add its dependencies to `requirements.txt`,
 mount its router(s) in `app/api/v1/router.py`, and move its tests out of
 the skip/importorskip guard in `apps/api/tests/`.
+
+## Milestone 4 note (schema/tooling only, not in the table above)
+
+Milestone 4 (per the DRR, not the "RAG Chat" milestone this file's table
+numbers above) made two implementation-detail changes across the whole
+`app/` tree rather than to one milestone's slice of it: `models/document.py`
+was renamed to `models/resource.py` (`Document` -> `Resource`, table
+`documents` -> `resources` -- see `docs/adr/0011-resource-content-model.md`),
+and schema management moved from `Base.metadata.create_all` to Alembic
+(`alembic/`, see `docs/adr/0010-alembic-migrations.md`). Every file that
+imported the old `Document` model -- including the still-dormant
+`services/retrieval_service.py` and `api/v1/routes/chat.py` -- was updated
+to import `Resource` instead, so the "Mounted in app.main today?" column
+above stays accurate without any dormant module also being a landmine
+against a model that no longer exists.

@@ -42,7 +42,7 @@ def test_ingestion_writes_chunks_and_vectors(registered_client, tmp_path):
     actually happened, not just that the document's status flipped to READY.
     """
     from app.db.session import SessionLocal
-    from app.models.document import DocumentChunk
+    from app.models.resource import ResourceChunk
     from app.services.vector_repo import get_vector_repository
 
     client, _ = registered_client
@@ -55,7 +55,7 @@ def test_ingestion_writes_chunks_and_vectors(registered_client, tmp_path):
 
     db = SessionLocal()
     try:
-        chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).all()
+        chunks = db.query(ResourceChunk).filter(ResourceChunk.resource_id == document_id).all()
         assert len(chunks) >= 1
         point_ids = {c.vector_point_id for c in chunks}
     finally:

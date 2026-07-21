@@ -18,8 +18,10 @@ class IngestionStep:
 class IngestionJob(Base, UUIDPK):
     __tablename__ = "ingestion_jobs"
 
-    document_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("documents.id"), index=True, nullable=False
+    # Renamed from document_id (Milestone 4): the parent entity is now
+    # Resource, not Document -- see app/models/resource.py.
+    resource_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resources.id"), index=True, nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     step: Mapped[str] = mapped_column(String(20), nullable=False, default=IngestionStep.UPLOADED)
@@ -28,4 +30,4 @@ class IngestionJob(Base, UUIDPK):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    document = relationship("Document", back_populates="jobs")
+    resource = relationship("Resource", back_populates="jobs")

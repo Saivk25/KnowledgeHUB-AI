@@ -13,6 +13,14 @@ Citation integrity rule: citation document/page/excerpt values are always
 read from the retrieved chunk metadata that the backend fetched, never from
 text the LLM generated. This prevents the model from inventing a page number
 or a document that was not actually retrieved.
+
+Milestone 4 update: this module is still dormant (not imported by anything
+mounted -- see app/README.md), but its import of the renamed Document model
+was updated to Resource so it does not raise ModuleNotFoundError the moment
+a future milestone activates it. Field/variable names below (document_id,
+document_filename, etc.) are left as-is; renaming them is a cosmetic choice
+for whichever milestone actually builds RAG chat, not part of this
+milestone's approved scope.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.document import Document, DocumentChunk, DocumentStatus
+from app.models.resource import Resource, ResourceChunk, ResourceStatus
 from app.services.embeddings import get_embedding_provider
 from app.services.llm import EvidenceChunk, get_llm_provider
 from app.services.vector_repo import get_vector_repository
@@ -68,8 +76,8 @@ def answer_question(db: Session, workspace_id: str, question: str) -> AnswerResu
 
     ready_doc_ids = {
         d.id
-        for d in db.query(Document.id)
-        .filter(Document.workspace_id == workspace_id, Document.status == DocumentStatus.READY)
+        for d in db.query(Resource.id)
+        .filter(Resource.workspace_id == workspace_id, Resource.status == ResourceStatus.READY)
         .all()
     }
     hits = [h for h in hits if h.point.document_id in ready_doc_ids]
@@ -85,7 +93,7 @@ def answer_question(db: Session, workspace_id: str, question: str) -> AnswerResu
         )
 
     documents_by_id = {
-        d.id: d for d in db.query(Document).filter(Document.id.in_({h.point.document_id for h in hits})).all()
+        d.id: d for d in db.query(Resource).filter(Resource.id.in_({h.point.document_id for h in hits})).all()
     }
 
     evidence: list[EvidenceChunk] = []
@@ -108,7 +116,7 @@ def answer_question(db: Session, workspace_id: str, question: str) -> AnswerResu
     citations: list[CitationResult] = []
     for e, hit in zip(evidence, hits, strict=False):
         chunk_row = (
-            db.query(DocumentChunk).filter(DocumentChunk.vector_point_id == hit.point.chunk_id).first()
+            db.query(ResourceChunk).filter(ResourceChunk.vector_point_id == hit.point.chunk_id).first()
         )
         citations.append(
             CitationResult(

@@ -5,6 +5,18 @@ Milestone 3 (Document Upload & Ingestion) scope: mounts health, auth,
 workspace, and documents routers. The chat router remains dormant -- see
 app/api/v1/router.py and app/README.md for why, and the frozen SRS /
 milestone plan for when it arrives.
+
+Milestone 4 change: schema creation no longer happens here. `Base.metadata.
+create_all` (ADR-0008) is retired in favor of Alembic-managed migrations
+(ADR-0010) -- run `alembic upgrade head` before starting the API in every
+environment (local dev, CI, Docker; see apps/api/Dockerfile's CMD and
+tests/conftest.py, both updated in this same milestone). Running migrations
+inside the app process at startup is deliberately avoided: with more than
+one API replica, concurrent `create_all`-style calls were harmless
+(idempotent, checkfirst), but concurrent migration runs are not -- a
+top-level `alembic upgrade head` is guarded by Alembic's own lock table
+(alembic_version) but is still meant to be run once, out of band, not
+racing N app instances on every restart.
 """
 
 from __future__ import annotations
@@ -20,8 +32,6 @@ from fastapi.responses import JSONResponse
 from app.api.routes.health import router as health_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.db.base import Base
-from app.db.session import engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,17 +53,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    # Milestone 3 adds documents/document_pages/document_chunks/
-    # ingestion_jobs (imported transitively via app.api.v1.router, which
-    # registers them on Base.metadata through the documents router).
-    # create_all is the frozen MVP decision (see
-    # docs/adr/0008-schema-create-all-not-alembic.md) -- Alembic migrations
-    # arrive only once there is real data to migrate around.
-    Base.metadata.create_all(bind=engine)
 
 
 @app.exception_handler(HTTPException)

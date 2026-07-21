@@ -1,5 +1,6 @@
 """
-Document upload and ingestion routes (Milestone 3).
+Document upload and ingestion routes (Milestone 3; underlying model renamed
+to Resource in Milestone 4 -- see app/models/resource.py).
 
 Scope: upload, list, detail (with processing-job status), retry, file
 download, and delete. Ingestion itself (extract -> chunk -> embed -> index)
@@ -7,10 +8,19 @@ runs in app/services/ingestion_service.py as a FastAPI BackgroundTask (see
 ADR-0005) so the upload request returns immediately with status=QUEUED and
 the client polls GET /documents/{id} for progress.
 
+Milestone 4 note: this route's URL prefix (/documents), request/response
+schemas (schemas/document.py), and error codes (DOCUMENT_NOT_FOUND,
+DUPLICATE_DOCUMENT, DOCUMENT_NOT_FAILED, etc.) are the frozen Milestone 3 API
+contract and are deliberately left unchanged -- Milestone 4's approved scope
+is the Resource schema + Alembic only, not an API surface change. Every
+resource created through this route is content_source=FILE; there is no
+route here (or anywhere yet) that creates a CAPTURE resource.
+
 Retrieval, chat, and citations are explicitly out of scope here -- see
-Milestone 4. Nothing in this module reads from the vector store; it only
-writes to it (upsert on ingest, delete on document delete), so Milestone 4
-can add a read-only search path without changing anything in this file.
+Milestone 4 (RAG Chat, per app/README.md's milestone numbering -- unrelated
+to "Milestone 4" in the product roadmap sense used elsewhere in this repo).
+Nothing in this module reads from the vector store; it only writes to it
+(upsert on ingest, delete on document delete).
 """
 
 from __future__ import annotations
@@ -22,8 +32,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps import AppError, get_current_workspace
-from app.models.document import Document, DocumentStatus
 from app.models.ingestion_job import IngestionJob
+from app.models.resource import Resource, ResourceContentSource, ResourceStatus
 from app.models.workspace import Workspace
 from app.schemas.document import DocumentDetailOut, DocumentListOut, DocumentOut, IngestionJobOut
 from app.services.ingestion_service import process_document
@@ -34,15 +44,15 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 settings = get_settings()
 
 
-def _to_out(document: Document) -> DocumentOut:
+def _to_out(resource: Resource) -> DocumentOut:
     return DocumentOut(
-        id=document.id,
-        filename=document.filename,
-        status=document.status,
-        pageCount=document.page_count,
-        sizeBytes=document.size_bytes,
-        errorMessage=document.error_message,
-        createdAt=document.created_at.isoformat() if document.created_at else "",
+        id=resource.id,
+        filename=resource.filename or "",
+        status=resource.status,
+        pageCount=resource.page_count,
+        sizeBytes=resource.size_bytes or 0,
+        errorMessage=resource.error_message,
+        createdAt=resource.created_at.isoformat() if resource.created_at else "",
     )
 
 
@@ -90,8 +100,8 @@ async def upload_document(
     storage_key, checksum = storage.save(workspace.id, file.filename, content)
 
     existing = (
-        db.query(Document)
-        .filter(Document.workspace_id == workspace.id, Document.checksum == checksum)
+        db.query(Resource)
+        .filter(Resource.workspace_id == workspace.id, Resource.checksum == checksum)
         .first()
     )
     if existing:
@@ -99,33 +109,34 @@ async def upload_document(
             status.HTTP_409_CONFLICT, "DUPLICATE_DOCUMENT", "This exact file has already been uploaded."
         )
 
-    document = Document(
+    resource = Resource(
         workspace_id=workspace.id,
+        content_source=ResourceContentSource.FILE,
         filename=file.filename,
         storage_key=storage_key,
         mime_type="application/pdf",
         size_bytes=len(content),
         checksum=checksum,
-        status=DocumentStatus.QUEUED,
+        status=ResourceStatus.QUEUED,
     )
-    db.add(document)
+    db.add(resource)
     db.flush()
 
-    job = IngestionJob(document_id=document.id, status="PENDING")
+    job = IngestionJob(resource_id=resource.id, status="PENDING")
     db.add(job)
     db.commit()
 
-    background_tasks.add_task(_run_ingestion, document.id)
+    background_tasks.add_task(_run_ingestion, resource.id)
 
-    return _to_out(document)
+    return _to_out(resource)
 
 
-def _run_ingestion(document_id: str) -> None:
+def _run_ingestion(resource_id: str) -> None:
     from app.db.session import SessionLocal
 
     db = SessionLocal()
     try:
-        process_document(db, document_id)
+        process_document(db, resource_id)
     finally:
         db.close()
 
@@ -142,13 +153,13 @@ def list_documents(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    documents = (
-        db.query(Document)
-        .filter(Document.workspace_id == workspace.id)
-        .order_by(Document.created_at.desc())
+    resources = (
+        db.query(Resource)
+        .filter(Resource.workspace_id == workspace.id)
+        .order_by(Resource.created_at.desc())
         .all()
     )
-    return DocumentListOut(items=[_to_out(d) for d in documents], nextCursor=None)
+    return DocumentListOut(items=[_to_out(r) for r in resources], nextCursor=None)
 
 
 @router.get(
@@ -167,18 +178,18 @@ def get_document(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    document = db.get(Document, document_id)
-    if not document or document.workspace_id != workspace.id:
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
         raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
 
     job = (
         db.query(IngestionJob)
-        .filter(IngestionJob.document_id == document_id)
+        .filter(IngestionJob.resource_id == document_id)
         .order_by(IngestionJob.id.desc())
         .first()
     )
     job_out = IngestionJobOut(step=job.step, status=job.status, errorCode=job.error_code) if job else None
-    return DocumentDetailOut(document=_to_out(document), processingJob=job_out)
+    return DocumentDetailOut(document=_to_out(resource), processingJob=job_out)
 
 
 @router.get(
@@ -195,13 +206,13 @@ def get_document_file(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    document = db.get(Document, document_id)
-    if not document or document.workspace_id != workspace.id:
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
         raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
 
     storage = get_storage()
-    path = storage.path_for(document.storage_key)
-    return FileResponse(path, media_type="application/pdf", filename=document.filename)
+    path = storage.path_for(resource.storage_key)
+    return FileResponse(path, media_type="application/pdf", filename=resource.filename)
 
 
 @router.delete(
@@ -219,18 +230,18 @@ def delete_document(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    document = db.get(Document, document_id)
-    if not document or document.workspace_id != workspace.id:
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
         raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
 
     get_vector_repository().delete_by_document(document_id)
     storage = get_storage()
     try:
-        storage.delete(document.storage_key)
+        storage.delete(resource.storage_key)
     except OSError:
         pass
 
-    db.delete(document)
+    db.delete(resource)
     db.commit()
     return None
 
@@ -247,16 +258,16 @@ def retry_document(
     workspace: Workspace = Depends(get_current_workspace),
     db: Session = Depends(get_db),
 ):
-    document = db.get(Document, document_id)
-    if not document or document.workspace_id != workspace.id:
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
         raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
-    if document.status != DocumentStatus.FAILED:
+    if resource.status != ResourceStatus.FAILED:
         raise AppError(
             status.HTTP_409_CONFLICT, "DOCUMENT_NOT_FAILED", "Only failed documents can be retried."
         )
 
-    document.status = DocumentStatus.QUEUED
-    document.error_message = None
+    resource.status = ResourceStatus.QUEUED
+    resource.error_message = None
     db.commit()
-    background_tasks.add_task(_run_ingestion, document.id)
-    return _to_out(document)
+    background_tasks.add_task(_run_ingestion, resource.id)
+    return _to_out(resource)

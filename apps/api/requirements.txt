@@ -8,6 +8,12 @@ pydantic-settings==2.5.2
 qdrant-client==1.11.1
 python-dotenv==1.0.1
 
+# Milestone 4 -- schema migrations (see docs/adr/0010-alembic-migrations.md).
+# Not a dev-only dependency: `alembic upgrade head` must run in every
+# environment (local, CI, Docker) before the API starts, now that
+# Base.metadata.create_all no longer runs on startup.
+alembic==1.13.3
+
 # Milestone 2 -- authentication
 # bcrypt is pinned explicitly (not just via passlib[bcrypt]) because
 # passlib 1.7.4's backend-detection code is incompatible with bcrypt>=4.1

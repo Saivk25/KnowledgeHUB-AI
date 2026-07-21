@@ -8,7 +8,7 @@ from app.deps import AppError, get_current_user, get_current_workspace
 from app.models.answer import Answer
 from app.models.citation import Citation
 from app.models.conversation import Conversation, Message
-from app.models.document import Document
+from app.models.resource import Resource
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.chat import (
@@ -73,7 +73,7 @@ def send_message(
         raise AppError(status.HTTP_404_NOT_FOUND, "CONVERSATION_NOT_FOUND", "Conversation not found.")
 
     ready_doc_count = (
-        db.query(Document).filter(Document.workspace_id == workspace.id, Document.status == "READY").count()
+        db.query(Resource).filter(Resource.workspace_id == workspace.id, Resource.status == "READY").count()
     )
     if ready_doc_count == 0:
         raise AppError(
@@ -106,7 +106,7 @@ def send_message(
     for c in result.citations:
         row = Citation(
             answer_id=answer.id,
-            document_id=c.document_id,
+            resource_id=c.document_id,
             chunk_id=c.chunk_id,
             page_number=c.page_number,
             excerpt=c.excerpt,
@@ -128,7 +128,7 @@ def send_message(
             content=result.content,
             citations=[
                 CitationOut(
-                    documentId=row.document_id,
+                    documentId=row.resource_id,
                     documentFilename=filename,
                     pageNumber=row.page_number,
                     excerpt=row.excerpt,

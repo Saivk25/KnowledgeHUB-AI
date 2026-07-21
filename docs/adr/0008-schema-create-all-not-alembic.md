@@ -1,6 +1,8 @@
 # ADR-0008: SQLAlchemy `create_all` instead of Alembic migrations
 
-**Status:** Accepted (MVP)
+**Status:** Superseded by ADR-0010 (Milestone 4). Kept for history --
+everything below was accurate for Milestones 1-3 and explains why this
+decision was correct at the time.
 
 **Decision:** Tables are created directly from the SQLAlchemy models on
 API startup (`Base.metadata.create_all`). There is no migrations directory.
