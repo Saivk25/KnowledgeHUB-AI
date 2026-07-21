@@ -1,0 +1,92 @@
+# KnowledgeHub AI -- local development stack.
+#
+# Milestone 1 (Project Foundation) scope: Postgres, Qdrant, the API, and the
+# web app all start and can prove they are wired together correctly via
+# health checks. No business environment variables (JWT secrets, AI
+# provider keys, storage paths) exist yet -- they are added in the
+# docker-compose update that ships alongside the milestone that needs them.
+#
+# Decision: Docker Compose, not Kubernetes.
+# Why: a single `docker compose up` reproduces the entire stack for a
+# reviewer with zero cloud account and zero cluster setup. Kubernetes
+# manifests belong in a much later milestone, once there is a real
+# multi-instance deployment target (see docs/adr/0009-docker-compose-not-kubernetes.md).
+#
+# Note on the Qdrant service: its image does not reliably ship a shell
+# utility we can use for a Docker HEALTHCHECK (no curl/wget, and /dev/tcp
+# is a bash-ism its minimal image may not support), so we intentionally
+# don't add one here rather than ship a healthcheck that could silently
+# always fail. `depends_on` still enforces start order, and the API's own
+# GET /health/ready endpoint is the authoritative way to confirm Qdrant is
+# actually reachable once the stack is up.
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: knowledgehub
+      POSTGRES_PASSWORD: knowledgehub
+      POSTGRES_DB: knowledgehub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowledgehub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.3
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  api:
+    build:
+      context: ./apps/api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://knowledgehub:knowledgehub@postgres:5432/knowledgehub
+      QDRANT_URL: http://qdrant:6333
+      WEB_ORIGIN: http://localhost:3000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  web:
+    build:
+      context: ./apps/web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  qdrant_data:

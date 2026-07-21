@@ -1,0 +1,31 @@
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.mixins import UUIDPK
+
+
+class IngestionStep:
+    UPLOADED = "UPLOADED"
+    EXTRACTING = "EXTRACTING"
+    INDEXING = "INDEXING"
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+
+class IngestionJob(Base, UUIDPK):
+    __tablename__ = "ingestion_jobs"
+
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id"), index=True, nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+    step: Mapped[str] = mapped_column(String(20), nullable=False, default=IngestionStep.UPLOADED)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    document = relationship("Document", back_populates="jobs")

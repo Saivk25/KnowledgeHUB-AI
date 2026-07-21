@@ -1,0 +1,9 @@
+__pycache__
+*.pyc
+.pytest_cache
+tests
+.env
+storage/
+requirements-dev.txt
+pyproject.toml
+.git

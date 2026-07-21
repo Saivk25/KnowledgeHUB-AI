@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+apps/api/storage/
+apps/api/*.db
+apps/api/.env
+
+# Node
+node_modules/
+.next/
+apps/web/.env.local
+
+# OS / editors
+.DS_Store
+.vscode/
