@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthProvider } from "@/lib/auth-context";
 
-// Milestone 1 (Project Foundation): no AuthProvider yet -- there is no
-// backend auth router to check a session against. It is restored here in
-// Milestone 2 once /api/v1/auth exists (see app/_future/README.md).
+// Milestone 2 (Authentication): AuthProvider wraps every page so that
+// useAuth()/useRequireAuth() (used by AppShell and the protected pages --
+// workspace, settings) have a session to read. Milestone 1 had no
+// AuthProvider because there was no backend auth router to check a
+// session against.
 
 export const metadata: Metadata = {
   title: "KnowledgeHub AI",
@@ -13,7 +16,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

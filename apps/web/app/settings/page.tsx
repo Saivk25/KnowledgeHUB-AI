@@ -97,7 +97,7 @@ export default function SettingsPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          KnowledgeHub AI · v0.1.0 ·{" "}
+          KnowledgeHub AI · v0.2.0 ·{" "}
           <a href="https://github.com" className="underline">
             GitHub
           </a>

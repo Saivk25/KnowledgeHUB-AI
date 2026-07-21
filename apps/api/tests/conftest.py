@@ -1,11 +1,12 @@
 """
-Shared pytest fixtures -- Milestone 1 (Project Foundation) scope.
+Shared pytest fixtures.
 
-Only what the foundation needs: an isolated SQLite database per test run
-and a FastAPI TestClient. Fixtures specific to later features (sample PDF
-generation, authenticated clients, etc.) live in their own milestone's test
-module so this file doesn't accumulate dependencies for features that
-don't exist yet.
+Milestone 1 fixtures (`client`) plus Milestone 2's `registered_client`,
+which registers a fresh user/workspace and returns an authenticated
+TestClient (the auth cookie persists across requests on the same
+TestClient instance, same as a browser session). Fixtures specific to
+later features (sample PDF generation, etc.) still live in their own
+milestone's test module -- see tests/pdf_helpers.py.
 """
 
 import os
@@ -36,3 +37,13 @@ def _reset_state():
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+@pytest.fixture
+def registered_client(client):
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"email": "demo@knowledgehub.ai", "password": "password123", "displayName": "Demo User"},
+    )
+    assert resp.status_code == 201, resp.text
+    return client, resp.json()

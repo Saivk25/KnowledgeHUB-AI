@@ -7,12 +7,13 @@
  * `credentials: "include"` is required on calls that need auth so the
  * httpOnly auth cookie set by the API is sent on subsequent requests.
  *
- * Milestone status: only `liveness` and `readiness` are wired to a live
- * backend router in Milestone 1 (Project Foundation) -- app/main.py does
- * not mount auth/documents/chat yet. The methods below for those features
- * are kept here (rather than deleted) because the screens in
- * app/_future/ already call them and are ready to go live the moment each
- * router is approved and mounted; see app/_future/README.md.
+ * Milestone status: `liveness`/`readiness` (Milestone 1) and
+ * `register`/`login`/`logout`/`me`/`getWorkspace`/`updateWorkspace`/
+ * `updateProfile` (Milestone 2) are wired to live backend routers.
+ * Everything under "Milestone 3" and "Milestone 4" below is kept here
+ * (rather than deleted) because the screens in app/_future/ already call
+ * them and are ready to go live the moment each router is approved and
+ * mounted; see app/_future/README.md.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -68,8 +69,9 @@ export interface LivenessResponse {
   app: string;
 }
 
-// -- Future milestones: auth, workspace, documents, chat ----------------
-// (types and methods below are not yet backed by a mounted router)
+// -- Milestone 2: auth, workspace (live) --------------------------------
+// -- Milestones 3-4: documents, chat (types kept for app/_future/ screens,
+//    not yet backed by a mounted router) -------------------------------
 
 export interface UserOut {
   id: string;
@@ -79,6 +81,17 @@ export interface UserOut {
 export interface WorkspaceOut {
   id: string;
   name: string;
+}
+// Milestone note: `stats` is optional because the backend does not return
+// it until the Document model exists in Milestone 3 (see
+// apps/api/app/api/v1/routes/workspace.py). It is declared here -- rather
+// than omitted -- only because the dormant Milestone 4 chat screen
+// (app/_future/chat/page.tsx) already reads it; making it optional keeps
+// that type-check honest without reactivating or rewriting that screen.
+export interface WorkspaceStatsOut {
+  readyDocuments: number;
+  processingDocuments: number;
+  failedDocuments: number;
 }
 export interface AuthResponse {
   user: UserOut;
@@ -123,7 +136,7 @@ export const api = {
   liveness: () => request<LivenessResponse>("/health"),
   readiness: () => request<ReadinessResponse>("/health/ready"),
 
-  // Milestone 2 -- auth/workspace (not mounted yet)
+  // Milestone 2 -- auth/workspace -- live
   register: (email: string, password: string, displayName: string) =>
     request<AuthResponse>("/api/v1/auth/register", { method: "POST", body: JSON.stringify({ email, password, displayName }) }),
   login: (email: string, password: string) =>
@@ -131,10 +144,9 @@ export const api = {
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
   me: () => request<{ user: UserOut; workspace: WorkspaceOut | null }>("/api/v1/auth/me"),
 
-  getWorkspace: () =>
-    request<{ workspace: WorkspaceOut; stats: { readyDocuments: number; processingDocuments: number; failedDocuments: number } }>(
-      "/api/v1/workspace"
-    ),
+  // `stats` is not present on the live Milestone 2 response yet -- see
+  // WorkspaceStatsOut's doc comment above.
+  getWorkspace: () => request<{ workspace: WorkspaceOut; stats?: WorkspaceStatsOut }>("/api/v1/workspace"),
   updateWorkspace: (name: string) =>
     request<{ workspace: WorkspaceOut }>("/api/v1/workspace", { method: "PATCH", body: JSON.stringify({ name }) }),
   updateProfile: (displayName: string) =>

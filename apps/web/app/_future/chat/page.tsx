@@ -35,7 +35,10 @@ export default function ChatPage() {
     (async () => {
       try {
         const ws = await api.getWorkspace();
-        setReadyCount(ws.stats.readyDocuments);
+        // `stats` doesn't exist on the response until Milestone 3 (see
+        // lib/api.ts) -- this screen is still dormant, so this is just
+        // enough to keep the whole project type-checking cleanly.
+        setReadyCount(ws.stats?.readyDocuments ?? 0);
         const conv = await api.createConversation();
         setConversationId(conv.id);
       } catch {

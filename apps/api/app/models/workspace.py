@@ -14,7 +14,11 @@ class Workspace(Base, UUIDPK, TimestampMixin):
 
     __tablename__ = "workspaces"
 
-    owner_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    # index=True: every protected request looks up "the current user's
+    # workspace" via get_current_workspace() filtering on this column
+    # (see app/deps.py). Without an index this is a full table scan per
+    # request once the table has more than a handful of rows.
+    owner_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="My Workspace")
 
     owner = relationship("User", back_populates="workspaces")

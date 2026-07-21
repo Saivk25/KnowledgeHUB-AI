@@ -27,3 +27,8 @@ class AuthResponse(BaseModel):
     user: UserOut
     workspace: WorkspaceOut
     accessToken: str
+
+
+class MeResponse(BaseModel):
+    user: UserOut
+    workspace: WorkspaceOut | None
