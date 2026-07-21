@@ -45,6 +45,18 @@ result. `_apply_classification` writes the automatic result to the
 only if the corresponding `_confirmed` flag is not already set -- a user's
 manual correction (via PATCH /documents/{id}/classification) is never
 silently overwritten by a later automatic (re)classification, e.g. on retry.
+
+Milestone 7 update: adds a CONCEPT_LINKING stage after indexing (it needs
+this resource's chunks and their vectors to already exist -- evidence
+links point at a specific chunk, and entity-resolution dedup runs an ANN
+search) and before DONE. Same graceful-degradation rule as CLASSIFYING: a
+concept-linking failure is logged and never fails the resource -- see
+`_link_concepts` below, app/services/concept_linking.py, and
+app/services/concept_graph.py. `_link_concepts` replaces (not appends to)
+this resource's existing ResourceConcept rows on every run, so a retry
+never accumulates stale duplicate evidence links; concept relationships
+are deduplicated at write time instead (see `_upsert_relationship`), since
+they are not scoped to one resource_id the way evidence links are.
 """
 
 from __future__ import annotations
@@ -55,6 +67,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.concept import Concept, ConceptRelationship, ConceptStatus, ResourceConcept
 from app.models.ingestion_job import IngestionJob, IngestionStep
 from app.models.resource import (
     Resource,
@@ -66,6 +79,8 @@ from app.models.resource import (
 )
 from app.services.chunking import chunk_pages
 from app.services.classification import Classification, get_classifier
+from app.services.concept_graph import find_nearby_concepts, recompute_concept_usage, resolve_concept
+from app.services.concept_linking import ChunkRef, RelationshipProposal, get_concept_linker
 from app.services.embeddings import get_embedding_provider
 from app.services.extraction import ExtractionError, get_extractor_for
 from app.services.storage import get_storage
@@ -234,6 +249,19 @@ def process_document(db: Session, resource_id: str) -> None:
         vector_repo = get_vector_repository()
         vector_repo.upsert(vector_points)
 
+        if job:
+            job.step = IngestionStep.CONCEPT_LINKING
+        db.commit()
+
+        try:
+            _link_concepts(db, resource, chunk_rows)
+        except Exception:  # noqa: BLE001
+            # Graceful degradation (approved design): concept-linking is
+            # enrichment, not a prerequisite -- never fail the resource
+            # over this, same rule as classification above.
+            logger.warning("concept_linking_failed resource_id=%s", resource.id, exc_info=True)
+        db.commit()
+
         resource.status = ResourceStatus.READY
         resource.error_message = None
         if job:
@@ -246,3 +274,100 @@ def process_document(db: Session, resource_id: str) -> None:
     except Exception:  # noqa: BLE001
         logger.exception("ingestion_error resource_id=%s", resource_id)
         _fail("INGESTION_ERROR", "An unexpected error occurred while processing this document.")
+
+
+def _link_concepts(db: Session, resource: Resource, chunk_rows: list[ResourceChunk]) -> None:
+    """Milestone 7's CONCEPT_LINKING stage body. See this module's
+    docstring for the replace-on-retry / dedup-at-write-time split between
+    ResourceConcept and ConceptRelationship."""
+    if not chunk_rows:
+        return
+
+    previously_linked_concept_ids = {
+        rc.concept_id
+        for rc in db.query(ResourceConcept).filter(ResourceConcept.resource_id == resource.id).all()
+    }
+    db.query(ResourceConcept).filter(ResourceConcept.resource_id == resource.id).delete(
+        synchronize_session=False
+    )
+    db.flush()
+
+    chunk_refs = [ChunkRef(id=c.id, content=c.content) for c in chunk_rows]
+    nearby = find_nearby_concepts(db, resource.workspace_id, resource.subject or resource.filename or "")
+
+    linker = get_concept_linker()
+    result = linker.propose(
+        subject=resource.subject,
+        subject_confidence=resource.subject_confidence,
+        content_category=resource.content_category,
+        filename=resource.filename or "",
+        chunks=chunk_refs,
+        nearby_concepts=nearby,
+    )
+
+    newly_linked_concept_ids: set[str] = set()
+
+    if result.concept is not None:
+        proposal = result.concept
+        concept: Concept | None = None
+
+        if proposal.concept_id is not None:
+            candidate = db.get(Concept, proposal.concept_id)
+            if candidate is not None and candidate.status == ConceptStatus.ACTIVE:
+                concept = candidate
+        elif proposal.name:
+            resolution = resolve_concept(db, resource.workspace_id, proposal.name, proposal.description)
+            concept = resolution.concept
+
+        if concept is not None:
+            db.add(
+                ResourceConcept(
+                    resource_id=resource.id,
+                    concept_id=concept.id,
+                    confidence=proposal.confidence,
+                    contribution_type=proposal.contribution_type,
+                    evidence_chunk_id=proposal.evidence_chunk_id,
+                )
+            )
+            newly_linked_concept_ids.add(concept.id)
+            db.flush()
+
+            for rel in result.relationships:
+                _upsert_relationship(db, resource.workspace_id, concept.id, rel)
+
+    db.flush()
+    recompute_concept_usage(db, previously_linked_concept_ids | newly_linked_concept_ids)
+
+
+def _upsert_relationship(
+    db: Session, workspace_id: str, from_concept_id: str, rel: RelationshipProposal
+) -> None:
+    """Concept relationships are not scoped to one resource_id, so
+    idempotency across retries is enforced at write time (skip if an
+    equivalent edge already exists) rather than by replacing a resource's
+    rows the way `_link_concepts` does for ResourceConcept above."""
+    if rel.to_concept_id == from_concept_id:
+        return  # no self-loops
+
+    existing = (
+        db.query(ConceptRelationship)
+        .filter(
+            ConceptRelationship.from_concept_id == from_concept_id,
+            ConceptRelationship.to_concept_id == rel.to_concept_id,
+            ConceptRelationship.relationship_type == rel.relationship_type,
+        )
+        .first()
+    )
+    if existing:
+        return
+
+    db.add(
+        ConceptRelationship(
+            workspace_id=workspace_id,
+            from_concept_id=from_concept_id,
+            to_concept_id=rel.to_concept_id,
+            relationship_type=rel.relationship_type,
+            strength=rel.strength,
+            evidence_chunk_id=rel.evidence_chunk_id,
+        )
+    )

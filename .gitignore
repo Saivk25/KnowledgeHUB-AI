@@ -6,6 +6,7 @@ apps/api/storage/
 apps/api/*.db
 apps/api/.env
 apps/api/.venv/
+*.db
 
 # Node
 node_modules/

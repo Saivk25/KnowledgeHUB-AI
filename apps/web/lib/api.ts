@@ -9,12 +9,14 @@
  *
  * Milestone status: `liveness`/`readiness` (Milestone 1),
  * `register`/`login`/`logout`/`me`/`getWorkspace`/`updateWorkspace`/
- * `updateProfile` (Milestone 2), and `listDocuments`/`getDocumentDetail`/
- * `uploadDocument`/`deleteDocument`/`retryDocument`/`fileUrl` (Milestone 3)
- * are all wired to live backend routers. Everything under "Milestone 4"
- * below is kept here (rather than deleted) because the dormant chat
- * screen in app/_future/ already calls it and is ready to go live the
- * moment that router is approved and mounted; see app/_future/README.md.
+ * `updateProfile` (Milestone 2), `listDocuments`/`getDocumentDetail`/
+ * `uploadDocument`/`deleteDocument`/`retryDocument`/`fileUrl` (Milestone 3),
+ * and `listConcepts`/`getConceptDetail`/`getRelatedConcepts`/`mergeConcept`
+ * (Milestone 7) are all wired to live backend routers. Everything under
+ * "Milestone 4" below is kept here (rather than deleted) because the
+ * dormant chat screen in app/_future/ already calls it and is ready to go
+ * live the moment that router is approved and mounted; see
+ * app/_future/README.md.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -136,6 +138,57 @@ export interface IngestionJobOut {
   status: string;
   errorCode: string | null;
 }
+
+// -- Milestone 7: concept graph -----------------------------------------
+
+export type ContributionType = "DEFINES" | "APPLIES" | "TESTS" | "EXTENDS" | "MENTIONS";
+export type RelationshipType =
+  | "RELATED_TO"
+  | "PREREQUISITE_OF"
+  | "DEPENDS_ON"
+  | "EXTENDS"
+  | "APPLIES"
+  | "CONTRADICTS"
+  | "REVISES";
+
+export interface ConceptLinkOut {
+  conceptId: string;
+  name: string;
+  contributionType: ContributionType;
+  confidence: number;
+}
+
+export interface ConceptOut {
+  id: string;
+  name: string;
+  description: string | null;
+  status: "ACTIVE" | "MERGED" | "UNUSED";
+  evidenceCount: number;
+  possibleDuplicateOfConceptId: string | null;
+  createdAt: string;
+}
+
+export interface EvidenceOut {
+  resourceId: string;
+  filename: string;
+  contributionType: ContributionType;
+  confidence: number;
+  evidenceChunkId: string;
+  excerpt: string;
+}
+
+export interface RelatedConceptOut {
+  conceptId: string;
+  name: string;
+  relationshipType: RelationshipType;
+  depth: number;
+}
+
+export interface ConceptDetailOut {
+  concept: ConceptOut;
+  evidence: EvidenceOut[];
+  related: RelatedConceptOut[];
+}
 export interface CitationOut {
   documentId: string;
   documentFilename: string;
@@ -178,7 +231,10 @@ export const api = {
 
   // Milestone 3 -- documents -- live
   listDocuments: () => request<{ items: DocumentOut[] }>("/api/v1/documents"),
-  getDocumentDetail: (id: string) => request<{ document: DocumentOut; processingJob: IngestionJobOut | null }>(`/api/v1/documents/${id}`),
+  getDocumentDetail: (id: string) =>
+    request<{ document: DocumentOut; processingJob: IngestionJobOut | null; concepts: ConceptLinkOut[] }>(
+      `/api/v1/documents/${id}`
+    ),
   uploadDocument: (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -197,6 +253,17 @@ export const api = {
     request<DocumentOut>(`/api/v1/documents/${id}/classification`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+
+  // Milestone 7 -- concept graph -- live
+  listConcepts: () => request<{ items: ConceptOut[] }>("/api/v1/concepts"),
+  getConceptDetail: (id: string) => request<ConceptDetailOut>(`/api/v1/concepts/${id}`),
+  getRelatedConcepts: (id: string, depth?: number) =>
+    request<RelatedConceptOut[]>(`/api/v1/concepts/${id}/related${depth ? `?depth=${depth}` : ""}`),
+  mergeConcept: (id: string, intoConceptId: string) =>
+    request<ConceptOut>(`/api/v1/concepts/${id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ intoConceptId }),
     }),
 
   // Milestone 4 -- chat (not mounted yet)

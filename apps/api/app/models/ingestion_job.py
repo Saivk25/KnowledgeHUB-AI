@@ -17,6 +17,15 @@ class IngestionStep:
     # app/services/ingestion_service.py's graceful-degradation handling.
     CLASSIFYING = "CLASSIFYING"
     INDEXING = "INDEXING"
+    # Milestone 7: concept-linking runs after indexing (it needs the
+    # resource's chunks and their vectors to already exist -- evidence
+    # links point at specific chunks, and dedup matching runs an ANN
+    # search that only makes sense once this resource's own vectors are
+    # indexed) and before DONE. Same graceful-degradation rule as
+    # CLASSIFYING: a concept-linking failure never lands here as FAILED --
+    # see app/services/concept_linking.py, app/services/concept_graph.py,
+    # and app/services/ingestion_service.py.
+    CONCEPT_LINKING = "CONCEPT_LINKING"
     DONE = "DONE"
     FAILED = "FAILED"
 

@@ -3,7 +3,10 @@ Milestone 4: Alembic migration chain integrity. Milestone 5 extended
 EXPECTED_RESOURCE_COLUMNS with `extraction_confidence` (migration
 0003_extraction_confidence) -- see that migration's docstring. Milestone 6
 extended it again with the ten classification/confidence columns (migration
-0004_classification_metadata).
+0004_classification_metadata). Milestone 7 adds three new tables --
+`concepts`, `resource_concepts`, `concept_relationships` (migration
+0005_concept_graph) -- to EXPECTED_TABLES; no `resources` columns changed,
+so EXPECTED_RESOURCE_COLUMNS is unchanged.
 
 These tests exist because conftest.py's autouse fixture already runs
 `alembic upgrade head` for every other test in this suite (see conftest.py's
@@ -39,6 +42,10 @@ EXPECTED_TABLES = {
     "resource_pages",
     "resource_chunks",
     "ingestion_jobs",
+    # Milestone 7 (Concept Graph, migration 0005_concept_graph):
+    "concepts",
+    "resource_concepts",
+    "concept_relationships",
     "alembic_version",
 }
 

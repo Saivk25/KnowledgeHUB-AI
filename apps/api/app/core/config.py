@@ -72,6 +72,28 @@ class Settings(BaseSettings):
     # docstring).
     CLASSIFICATION_PROVIDER: str = "local"  # local | openai
 
+    # -- Milestone 7 (Concept Graph) -- read by app/services/concept_linking.py
+    # and app/services/concept_graph.py. CONCEPT_LINKER_PROVIDER mirrors
+    # CLASSIFICATION_PROVIDER's exact pattern: OpenAIConceptLinker is only
+    # ever selected when this is "openai" AND OPENAI_API_KEY is set;
+    # otherwise LocalConceptLinker runs (evidence links only, no typed
+    # relationships -- see concept_linking.py's docstring for why).
+    CONCEPT_LINKER_PROVIDER: str = "local"  # local | openai
+    # A second Qdrant collection, reusing the same deployment (DRR Section
+    # 3: "reusing the existing vector store, not a new index") rather than
+    # a dedicated similarity index or graph database.
+    QDRANT_CONCEPT_COLLECTION: str = "concept_vectors_v1"
+    # Three-zone dedup/entity-resolution thresholds (DRR Section 11).
+    # Above this, a candidate concept is treated as an existing one:
+    SIMILARITY_MERGE_THRESHOLD: float = 0.85
+    # Between this and SIMILARITY_MERGE_THRESHOLD, a new concept is still
+    # created but flagged `possible_duplicate_of_concept_id` for manual
+    # review via POST /concepts/{id}/merge -- never auto-merged:
+    POSSIBLE_DUPLICATE_THRESHOLD: float = 0.65
+    # Belt-and-suspenders bound on every recursive concept-graph traversal,
+    # independent of the visited-node guard (DRR Section 11):
+    MAX_TRAVERSAL_DEPTH: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

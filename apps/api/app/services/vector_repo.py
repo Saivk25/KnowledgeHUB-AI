@@ -15,6 +15,18 @@ production-shaped vector store (see ADR-0002).
 Every payload point carries workspace_id + document_id so authorization is
 enforced at the retrieval layer, not just the API layer — a document that
 is deleted or belongs to another workspace can never be retrieved.
+
+Milestone 7 addition: concept-level embeddings (for entity-resolution
+similarity matching, DRR Section 3/11) reuse this exact same
+QdrantVectorRepository/InMemoryVectorRepository machinery against a
+*second* collection (`settings.QDRANT_CONCEPT_COLLECTION`) rather than a
+new store or a dedicated similarity index -- see
+`get_concept_vector_repository()` below. `VectorPoint` gains one optional
+field, `concept_id`, and every other field gets a default so a concept
+point only has to populate what actually applies to it -- the same
+"extend the meaning of an existing type rather than fork it" precedent
+already used for `page_number` (services/extraction.py) and for
+`document_id` itself (this field's own comment, below).
 """
 
 from __future__ import annotations
@@ -29,10 +41,23 @@ class VectorPoint:
     id: str
     vector: list[float]
     workspace_id: str
-    document_id: str
-    chunk_id: str
-    page_number: int
-    content: str
+    # VectorPoint/vector_repo.py keep the field name "document_id" for this
+    # milestone (see the pre-existing comment on this in
+    # ingestion_service.py) -- the value is the Resource's id for chunk
+    # points. Given defaults below so a concept point (Milestone 7) can
+    # leave this and the following three fields unset rather than filling
+    # them with meaningless placeholders.
+    document_id: str = ""
+    chunk_id: str = ""
+    page_number: int = 0
+    content: str = ""
+    # Milestone 7 only: set for points in the concept-vector collection,
+    # None for ordinary chunk points. Kept as a distinct, explicitly-named
+    # field (rather than further overloading document_id) since a concept
+    # point and a chunk point are never stored in the same collection and
+    # code reading a concept point should not have to remember that
+    # "document_id" secretly means "concept_id" here.
+    concept_id: str | None = None
 
 
 @dataclass
@@ -50,6 +75,9 @@ class VectorRepository(ABC):
 
     @abstractmethod
     def delete_by_document(self, document_id: str) -> None: ...
+
+    @abstractmethod
+    def delete_by_concept(self, concept_id: str) -> None: ...
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -78,6 +106,9 @@ class InMemoryVectorRepository(VectorRepository):
     def delete_by_document(self, document_id: str) -> None:
         self._points = {k: v for k, v in self._points.items() if v.document_id != document_id}
 
+    def delete_by_concept(self, concept_id: str) -> None:
+        self._points = {k: v for k, v in self._points.items() if v.concept_id != concept_id}
+
 
 class QdrantVectorRepository(VectorRepository):
     def __init__(self, url: str, collection: str, dimension: int):
@@ -100,6 +131,12 @@ class QdrantVectorRepository(VectorRepository):
             self.client.create_payload_index(
                 collection_name=collection, field_name="document_id", field_schema="keyword"
             )
+            # Milestone 7: harmless on the chunk collection (never queried
+            # there); required on the concept collection for
+            # delete_by_concept() below.
+            self.client.create_payload_index(
+                collection_name=collection, field_name="concept_id", field_schema="keyword"
+            )
 
     def upsert(self, points: list[VectorPoint]) -> None:
         qm = self._qm
@@ -115,6 +152,7 @@ class QdrantVectorRepository(VectorRepository):
                         "chunk_id": p.chunk_id,
                         "page_number": p.page_number,
                         "content": p.content,
+                        "concept_id": p.concept_id,
                     },
                 )
                 for p in points
@@ -144,6 +182,7 @@ class QdrantVectorRepository(VectorRepository):
                         chunk_id=payload.get("chunk_id", ""),
                         page_number=payload.get("page_number", 0),
                         content=payload.get("content", ""),
+                        concept_id=payload.get("concept_id"),
                     ),
                     score=h.score,
                 )
@@ -157,6 +196,17 @@ class QdrantVectorRepository(VectorRepository):
             points_selector=qm.FilterSelector(
                 filter=qm.Filter(
                     must=[qm.FieldCondition(key="document_id", match=qm.MatchValue(value=document_id))]
+                )
+            ),
+        )
+
+    def delete_by_concept(self, concept_id: str) -> None:
+        qm = self._qm
+        self.client.delete(
+            collection_name=self.collection,
+            points_selector=qm.FilterSelector(
+                filter=qm.Filter(
+                    must=[qm.FieldCondition(key="concept_id", match=qm.MatchValue(value=concept_id))]
                 )
             ),
         )
@@ -202,3 +252,42 @@ def set_vector_repository(repo: VectorRepository) -> None:
 def reset_vector_repository_cache() -> None:
     global _repo
     _repo = None
+
+
+_concept_repo: VectorRepository | None = None
+
+
+def get_concept_vector_repository() -> VectorRepository:
+    """Milestone 7: same Qdrant deployment, second collection
+    (`settings.QDRANT_CONCEPT_COLLECTION`) -- see this module's docstring.
+    Falls back to a dedicated in-memory instance under the same
+    "degrade gracefully if Qdrant is unreachable" rule as
+    get_vector_repository(), and is a genuinely separate cache/instance
+    from it so concept vectors and chunk vectors are never accidentally
+    mixed even in the in-memory fallback."""
+    global _concept_repo
+    if _concept_repo is not None:
+        return _concept_repo
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    try:
+        _concept_repo = QdrantVectorRepository(
+            url=settings.QDRANT_URL,
+            collection=settings.QDRANT_CONCEPT_COLLECTION,
+            dimension=settings.EMBEDDING_DIMENSION,
+        )
+    except Exception:
+        _concept_repo = InMemoryVectorRepository()
+    return _concept_repo
+
+
+def set_concept_vector_repository(repo: VectorRepository) -> None:
+    """Used by tests to force the in-memory implementation deterministically."""
+    global _concept_repo
+    _concept_repo = repo
+
+
+def reset_concept_vector_repository_cache() -> None:
+    global _concept_repo
+    _concept_repo = None

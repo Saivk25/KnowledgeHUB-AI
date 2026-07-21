@@ -50,6 +50,18 @@ class IngestionJobOut(BaseModel):
     errorCode: str | None = None
 
 
+class ConceptLinkOut(BaseModel):
+    """Milestone 7: one of this document's evidence links into the concept
+    graph, surfaced on the detail response only (not the list response --
+    see DocumentDetailOut below)."""
+
+    conceptId: str
+    name: str
+    contributionType: str
+    confidence: float
+
+
 class DocumentDetailOut(BaseModel):
     document: DocumentOut
     processingJob: IngestionJobOut | None = None
+    concepts: list[ConceptLinkOut] = []

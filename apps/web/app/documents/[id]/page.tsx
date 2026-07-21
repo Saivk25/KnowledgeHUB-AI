@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import CategoryBadge from "@/components/CategoryBadge";
-import { api, ApiError, ContentCategory, DocumentOut, IngestionJobOut } from "@/lib/api";
+import { api, ApiError, ConceptLinkOut, ContentCategory, DocumentOut, IngestionJobOut } from "@/lib/api";
 
 const STEPS = [
   { key: "UPLOADED", label: "Uploaded" },
   { key: "EXTRACTING", label: "Extracting text" },
   { key: "CLASSIFYING", label: "Classifying content" },
   { key: "INDEXING", label: "Creating knowledge index" },
+  { key: "CONCEPT_LINKING", label: "Linking concepts" },
   { key: "DONE", label: "Ready" },
 ];
 
@@ -35,6 +36,7 @@ export default function DocumentDetailPage() {
   const router = useRouter();
   const [document, setDocument] = useState<DocumentOut | null>(null);
   const [job, setJob] = useState<IngestionJobOut | null>(null);
+  const [concepts, setConcepts] = useState<ConceptLinkOut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [editingClassification, setEditingClassification] = useState(false);
@@ -48,6 +50,7 @@ export default function DocumentDetailPage() {
       const res = await api.getDocumentDetail(params.id);
       setDocument(res.document);
       setJob(res.processingJob);
+      setConcepts(res.concepts || []);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't load this document.");
@@ -213,6 +216,30 @@ export default function DocumentDetailPage() {
                           Cancel
                         </button>
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Milestone 7: this document's evidence links into the
+                    concept graph. Deliberately minimal -- no redesign,
+                    no filtering, just the concepts this document
+                    evidences, linking to each concept's own page. */}
+                <div className="rounded-lg border border-edge bg-surface px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Concepts</p>
+                  {concepts.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No concepts linked yet.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {concepts.map((c) => (
+                        <Link
+                          key={c.conceptId}
+                          href={`/concepts/${c.conceptId}`}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-indigo/30 bg-indigo/10 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo/20"
+                        >
+                          {c.name}
+                          <span className="text-indigo-500">· {c.contributionType.toLowerCase()}</span>
+                        </Link>
+                      ))}
                     </div>
                   )}
                 </div>

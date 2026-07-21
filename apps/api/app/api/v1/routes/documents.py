@@ -43,6 +43,17 @@ auto-classified category/subject; once corrected, that field's `_confirmed`
 flag is set and automatic reclassification (e.g. on a future retry) will
 never overwrite it again (app/services/ingestion_service.py enforces this,
 not this route).
+
+Milestone 7 note (Concept Graph): `get_document` now additionally returns
+`concepts` (this resource's evidence links -- see app/schemas/document.py's
+`ConceptLinkOut`). `delete_document` collects the concept_ids this
+resource evidenced *before* the cascade delete removes its
+`ResourceConcept` rows, then runs the orphan-prevention check
+(app/services/concept_graph.py's `recompute_concept_usage`) afterward, so a
+concept whose only evidence was this resource is marked `UNUSED` rather
+than silently left dangling. No concept-creation route lives here or in
+app/api/v1/routes/concepts.py -- concepts are only ever created by
+app/services/ingestion_service.py's concept-linking stage.
 """
 
 from __future__ import annotations
@@ -54,17 +65,20 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps import AppError, get_current_workspace
+from app.models.concept import Concept, ResourceConcept
 from app.models.ingestion_job import IngestionJob
 from app.models.resource import Resource, ResourceContentCategory, ResourceContentSource, ResourceStatus
 from app.models.workspace import Workspace
 from app.schemas.document import (
     ClassificationUpdateRequest,
+    ConceptLinkOut,
     DocumentDetailOut,
     DocumentListOut,
     DocumentOut,
     IngestionJobOut,
     YoutubeIngestRequest,
 )
+from app.services.concept_graph import recompute_concept_usage
 from app.services.extraction import SUPPORTED_EXTENSIONS, is_supported_filename, mime_type_for
 from app.services.ingestion_service import process_document
 from app.services.storage import get_storage
@@ -305,7 +319,23 @@ def get_document(
         .first()
     )
     job_out = IngestionJobOut(step=job.step, status=job.status, errorCode=job.error_code) if job else None
-    return DocumentDetailOut(document=_to_out(resource), processingJob=job_out)
+
+    concept_links = db.query(ResourceConcept).filter(ResourceConcept.resource_id == document_id).all()
+    concepts_out = []
+    for link in concept_links:
+        concept = db.get(Concept, link.concept_id)
+        if concept is None:
+            continue
+        concepts_out.append(
+            ConceptLinkOut(
+                conceptId=concept.id,
+                name=concept.name,
+                contributionType=link.contribution_type,
+                confidence=link.confidence,
+            )
+        )
+
+    return DocumentDetailOut(document=_to_out(resource), processingJob=job_out, concepts=concepts_out)
 
 
 @router.get(
@@ -350,6 +380,14 @@ def delete_document(
     if not resource or resource.workspace_id != workspace.id:
         raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
 
+    # Milestone 7: collect the concepts this resource evidenced *before*
+    # the cascade delete removes its ResourceConcept rows, so the
+    # orphan-prevention check can run once they're actually gone.
+    affected_concept_ids = {
+        link.concept_id
+        for link in db.query(ResourceConcept).filter(ResourceConcept.resource_id == document_id).all()
+    }
+
     get_vector_repository().delete_by_document(document_id)
     storage = get_storage()
     try:
@@ -358,6 +396,9 @@ def delete_document(
         pass
 
     db.delete(resource)
+    db.flush()
+    if affected_concept_ids:
+        recompute_concept_usage(db, affected_concept_ids)
     db.commit()
     return None
 

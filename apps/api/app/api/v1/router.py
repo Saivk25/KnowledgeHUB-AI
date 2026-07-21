@@ -11,9 +11,13 @@ of its milestone review. Add it back in Milestone 4.
 
 from fastapi import APIRouter
 
-from app.api.v1.routes import auth, documents, workspace
+from app.api.v1.routes import auth, concepts, documents, workspace
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
 api_router.include_router(workspace.router)
 api_router.include_router(documents.router)
+# Milestone 7 (Concept Graph): concepts are only ever created by the
+# ingestion pipeline (documents.router already mounted above); this
+# router is read/merge only.
+api_router.include_router(concepts.router)

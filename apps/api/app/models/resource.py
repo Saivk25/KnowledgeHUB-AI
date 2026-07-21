@@ -55,6 +55,12 @@ Milestone 6 addition: `content_category`/`subject` (+ confidences +
 `_confirmed` flags) and their `auto_*` counterparts (migration 0004). See
 those fields' own inline comments and
 docs/adr/0013-classification-confidence.md.
+
+Milestone 7 addition: no new columns on Resource itself -- the concept
+graph (migration 0005) lives in three new tables (see
+app/models/concept.py). Resource only gains one new relationship,
+`concept_links`, mirroring `pages`/`chunks`/`jobs`'s existing
+cascade-delete pattern. See docs/adr/0014-concept-graph.md.
 """
 
 from __future__ import annotations
@@ -196,6 +202,12 @@ class Resource(Base, UUIDPK, TimestampMixin):
     pages = relationship("ResourcePage", back_populates="resource", cascade="all, delete-orphan")
     chunks = relationship("ResourceChunk", back_populates="resource", cascade="all, delete-orphan")
     jobs = relationship("IngestionJob", back_populates="resource", cascade="all, delete-orphan")
+    # Milestone 7: this resource's evidence links into the concept graph.
+    # Cascades on resource delete (same pattern as pages/chunks/jobs above);
+    # api/v1/routes/documents.py's delete_document() reads the affected
+    # concept_ids *before* the cascade runs so it can run the orphan-check
+    # (app/services/concept_graph.py's recompute_concept_usage()) after.
+    concept_links = relationship("ResourceConcept", back_populates="resource", cascade="all, delete-orphan")
 
 
 class ResourcePage(Base, UUIDPK):

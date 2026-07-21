@@ -22,6 +22,7 @@ is never ambiguous from a directory listing alone.
 | `services/storage.py`, `services/extraction.py`, `services/chunking.py`, `services/ingestion_service.py` | 3 -- Document Ingestion | **Yes** |
 | `services/embeddings.py` (embed/write path), `services/vector_repo.py` (upsert/delete) | 3 -- Document Ingestion | **Yes** |
 | `schemas/document.py`, `api/v1/routes/documents.py` | 3 -- Document Ingestion | **Yes** |
+| `models/concept.py`, `services/concept_linking.py`, `services/concept_graph.py`, `schemas/concept.py`, `api/v1/routes/concepts.py` | 7 -- Concept Graph | **Yes** |
 | `models/conversation.py`, `models/answer.py`, `models/citation.py` | 4 -- RAG Chat | No |
 | `services/embeddings.py` (`embed_one` on a query), `services/vector_repo.py` (`search`), `services/llm.py`, `services/retrieval_service.py` | 4 -- RAG Chat | No |
 | `schemas/chat.py`, `api/v1/routes/chat.py` | 4 -- RAG Chat | No |
@@ -137,3 +138,39 @@ per-word confidence) -- stored now, not yet surfaced in the API response
 `youtube-transcript-api`, plus the `tesseract-ocr` system package in the
 Dockerfile) all landed in this milestone specifically because this is the
 first milestone that needs them, continuing the discipline described above.
+
+## Milestone 7 note (Concept Graph, per the roadmap's own numbering)
+
+Three new tables (migration `0005_concept_graph`, models in
+`models/concept.py`): `Concept`, `ResourceConcept` (the evidence link --
+resource contributes evidence to concept, with a required
+`evidence_chunk_id`), `ConceptRelationship` (a typed, directed edge
+between two concepts, also with a required `evidence_chunk_id`). No new
+runtime dependencies -- concept linking reuses `services/embeddings.py`
+and `services/vector_repo.py` exactly as they already existed.
+
+Two new service modules mirror the existing registry pattern:
+`services/concept_linking.py` (`ConceptLinker`: `LocalConceptLinker`
+reuses Milestone 6's `subject`/`content_category` fields as a seed, never
+adds NLP; `OpenAIConceptLinker` is retrieval-grounded and auto-selected
+only when `CONCEPT_LINKER_PROVIDER=openai` and `OPENAI_API_KEY` are both
+set) and `services/concept_graph.py` (entity-resolution/dedup via
+`resolve_concept`, the manual-merge escape hatch via `merge_concepts`,
+orphan-prevention via `recompute_concept_usage`, and the one shared
+cycle-safe traversal helper, `traverse_concept_graph`, that every current
+and future graph query must use). `services/vector_repo.py` gained a
+second collection (`get_concept_vector_repository()`) for concept-level
+embeddings, reusing the same Qdrant deployment rather than a new store.
+
+Ingestion gains a new `CONCEPT_LINKING` stage between indexing and
+`DONE` (`services/ingestion_service.py`'s `_link_concepts`), with the same
+graceful-degradation rule Milestone 6 established for classification: a
+concept-linking failure is logged and never fails the resource.
+`api/v1/routes/concepts.py` (new, mounted in `api/v1/router.py`) is
+read/merge only -- concepts are only ever created by the ingestion
+pipeline. `api/v1/routes/documents.py`'s `get_document` now additionally
+returns this resource's concept evidence links; `delete_document` runs
+the orphan-prevention check after its cascade delete removes a resource's
+evidence links. See `docs/adr/0014-concept-graph.md` for the full set of
+approved design decisions, including the dedup thresholds, the
+evidence-required rule, and the BackgroundTask-vs-queue re-evaluation.

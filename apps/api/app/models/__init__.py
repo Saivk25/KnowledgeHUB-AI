@@ -1,5 +1,13 @@
 from app.models.answer import Answer
 from app.models.citation import Citation
+from app.models.concept import (
+    Concept,
+    ConceptRelationship,
+    ConceptStatus,
+    ContributionType,
+    RelationshipType,
+    ResourceConcept,
+)
 from app.models.conversation import Conversation, Message
 from app.models.ingestion_job import IngestionJob, IngestionStep
 from app.models.resource import (
@@ -24,6 +32,12 @@ __all__ = [
     "ResourceContentCategory",
     "IngestionJob",
     "IngestionStep",
+    "Concept",
+    "ConceptStatus",
+    "ContributionType",
+    "RelationshipType",
+    "ResourceConcept",
+    "ConceptRelationship",
     "Conversation",
     "Message",
     "Answer",
