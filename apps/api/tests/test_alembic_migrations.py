@@ -6,7 +6,11 @@ extended it again with the ten classification/confidence columns (migration
 0004_classification_metadata). Milestone 7 adds three new tables --
 `concepts`, `resource_concepts`, `concept_relationships` (migration
 0005_concept_graph) -- to EXPECTED_TABLES; no `resources` columns changed,
-so EXPECTED_RESOURCE_COLUMNS is unchanged.
+so EXPECTED_RESOURCE_COLUMNS is unchanged. Milestone 8 (migration
+0006_retrieval_provenance) finally creates `conversations`, `messages`,
+`answers`, `citations` -- dormant since Milestone 4 (see
+0001_baseline_schema.py's docstring) -- and adds
+EXPECTED_WORKSPACE_COLUMNS' `allow_external_fallback` to `workspaces`.
 
 These tests exist because conftest.py's autouse fixture already runs
 `alembic upgrade head` for every other test in this suite (see conftest.py's
@@ -32,9 +36,7 @@ from alembic.config import Config
 _ALEMBIC_INI = os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini")
 
 # Tables a fresh `alembic upgrade head` is expected to create as of
-# Milestone 4. Deliberately excludes conversations/messages/answers/
-# citations -- see 0001_baseline_schema.py's docstring for why those are not
-# created yet.
+# Milestone 8.
 EXPECTED_TABLES = {
     "users",
     "workspaces",
@@ -46,7 +48,22 @@ EXPECTED_TABLES = {
     "concepts",
     "resource_concepts",
     "concept_relationships",
+    # Milestone 8 (Local-First Retrieval & Provenance, migration
+    # 0006_retrieval_provenance) -- dormant since Milestone 4, see that
+    # migration's docstring:
+    "conversations",
+    "messages",
+    "answers",
+    "citations",
     "alembic_version",
+}
+
+EXPECTED_WORKSPACE_COLUMNS = {
+    "id",
+    "created_at",
+    "owner_user_id",
+    "name",
+    "allow_external_fallback",
 }
 
 EXPECTED_RESOURCE_COLUMNS = {
@@ -124,6 +141,9 @@ def test_upgrade_head_from_empty_creates_expected_schema(scratch_db_url):
 
     resource_columns = {c["name"] for c in inspector.get_columns("resources")}
     assert resource_columns == EXPECTED_RESOURCE_COLUMNS
+
+    workspace_columns = {c["name"] for c in inspector.get_columns("workspaces")}
+    assert workspace_columns == EXPECTED_WORKSPACE_COLUMNS
 
     columns_by_name = {c["name"]: c for c in inspector.get_columns("resources")}
     for name in NULLABLE_RESOURCE_COLUMNS:
@@ -236,3 +256,4 @@ def test_stamping_baseline_then_upgrading_matches_fresh_upgrade(scratch_db_url):
     inspector = inspect(create_engine(scratch_db_url))
     assert set(inspector.get_table_names()) == EXPECTED_TABLES
     assert {c["name"] for c in inspector.get_columns("resources")} == EXPECTED_RESOURCE_COLUMNS
+    assert {c["name"] for c in inspector.get_columns("workspaces")} == EXPECTED_WORKSPACE_COLUMNS

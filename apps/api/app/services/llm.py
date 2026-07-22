@@ -46,6 +46,21 @@ class LLMProvider(ABC):
     @abstractmethod
     def answer(self, question: str, evidence: list[EvidenceChunk]) -> str: ...
 
+    @abstractmethod
+    def answer_general_knowledge(self, question: str) -> str:
+        """
+        Milestone 8 (Local-First Retrieval & Provenance): used only when
+        retrieval_service has already determined local evidence is
+        insufficient AND the caller has consent (explicit per-request
+        confirmation, or the workspace's allow_external_fallback setting)
+        to answer from general knowledge instead. This method must never
+        be called without that consent -- retrieval_service enforces that,
+        not this class -- and its output must never be presented as
+        sourced from the user's documents (see
+        GENERAL_KNOWLEDGE_SYSTEM_INSTRUCTIONS below).
+        """
+        ...
+
 
 SYSTEM_INSTRUCTIONS = (
     "You are KnowledgeHub AI, an enterprise document assistant. Answer ONLY using "
@@ -53,6 +68,14 @@ SYSTEM_INSTRUCTIONS = (
     "by its citation number in square brackets, e.g. [1]. If the evidence does not "
     "contain the answer, say you could not find sufficient evidence. Never invent "
     "facts, page numbers, or documents that are not in the evidence."
+)
+
+GENERAL_KNOWLEDGE_SYSTEM_INSTRUCTIONS = (
+    "You are KnowledgeHub AI. The user's own documents did not contain enough "
+    "evidence to answer this question, and the user has explicitly agreed to see "
+    "a general-knowledge answer instead. Answer from your own knowledge, but begin "
+    "your answer by clearly stating that this answer is not sourced from their "
+    "documents. Never claim a fact came from their workspace."
 )
 
 
@@ -94,6 +117,21 @@ class OpenAIChatProvider(LLMProvider):
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
 
+    def answer_general_knowledge(self, question: str) -> str:
+        response = self._client.post(
+            "/chat/completions",
+            json={
+                "model": settings.OPENAI_CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": GENERAL_KNOWLEDGE_SYSTEM_INSTRUCTIONS},
+                    {"role": "user", "content": question},
+                ],
+                "temperature": 0.2,
+            },
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
 
 class ExtractiveFallbackProvider(LLMProvider):
     name = "extractive-fallback"
@@ -108,6 +146,15 @@ class ExtractiveFallbackProvider(LLMProvider):
                 snippet = snippet[:320].rsplit(" ", 1)[0] + "..."
             lines.append(f"{snippet} [{e.order}]")
         return "\n\n".join(lines)
+
+    def answer_general_knowledge(self, question: str) -> str:
+        # Honest degraded behavior (ADR-0004): never fabricate a
+        # general-knowledge answer without a real model behind it.
+        return (
+            "General-knowledge answers require a configured AI provider "
+            "(set OPENAI_API_KEY) -- this workspace is currently running "
+            "without one, so I can only answer from your own documents."
+        )
 
 
 _provider: LLMProvider | None = None

@@ -11,12 +11,9 @@
  * `register`/`login`/`logout`/`me`/`getWorkspace`/`updateWorkspace`/
  * `updateProfile` (Milestone 2), `listDocuments`/`getDocumentDetail`/
  * `uploadDocument`/`deleteDocument`/`retryDocument`/`fileUrl` (Milestone 3),
- * and `listConcepts`/`getConceptDetail`/`getRelatedConcepts`/`mergeConcept`
- * (Milestone 7) are all wired to live backend routers. Everything under
- * "Milestone 4" below is kept here (rather than deleted) because the
- * dormant chat screen in app/_future/ already calls it and is ready to go
- * live the moment that router is approved and mounted; see
- * app/_future/README.md.
+ * `listConcepts`/`getConceptDetail`/`getRelatedConcepts`/`mergeConcept`
+ * (Milestone 7), and `createConversation`/`getConversation`/`sendMessage`
+ * (Milestone 8) are all wired to live backend routers.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -189,6 +186,10 @@ export interface ConceptDetailOut {
   evidence: EvidenceOut[];
   related: RelatedConceptOut[];
 }
+// -- Milestone 8: local-first retrieval & provenance --------------------
+
+export type Provenance = "LOCAL" | "HYBRID" | "EXTERNAL";
+
 export interface CitationOut {
   documentId: string;
   documentFilename: string;
@@ -198,7 +199,11 @@ export interface CitationOut {
 }
 export interface AnswerOut {
   id: string;
-  status: "OK" | "NO_EVIDENCE" | "ERROR";
+  status: "OK" | "INSUFFICIENT" | "ERROR";
+  provenance: Provenance | null;
+  sufficiencyScore: number;
+  retrievalConfidence: number;
+  canOfferExternalFallback: boolean;
   content: string;
   citations: CitationOut[];
 }
@@ -266,13 +271,13 @@ export const api = {
       body: JSON.stringify({ intoConceptId }),
     }),
 
-  // Milestone 4 -- chat (not mounted yet)
+  // Milestone 8 -- chat / local-first retrieval -- live
   createConversation: () => request<{ id: string; title: string }>("/api/v1/conversations", { method: "POST", body: JSON.stringify({}) }),
   getConversation: (id: string) =>
     request<{ conversation: { id: string; title: string }; messages: MessageOut[] }>(`/api/v1/conversations/${id}`),
-  sendMessage: (id: string, content: string) =>
+  sendMessage: (id: string, content: string, useExternalFallback = false) =>
     request<{ userMessage: MessageOut; answer: AnswerOut }>(`/api/v1/conversations/${id}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, useExternalFallback }),
     }),
 };

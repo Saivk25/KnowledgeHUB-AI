@@ -1,17 +1,18 @@
 """
 v1 API router.
 
-Milestone 3 (Document Upload & Ingestion) scope: auth, workspace, and
-documents are mounted. `chat` is intentionally NOT imported here yet --
-it transitively imports app.services.llm, which needs an AI-provider
-client not wired until Milestone 4 (RAG Chat). Importing this router with
-chat included now would pull in code with no defined behavior yet, ahead
-of its milestone review. Add it back in Milestone 4.
+Milestone 8 (Local-First Retrieval & Provenance) mounts `chat` for the
+first time -- its retrieval pipeline (app/services/retrieval_service.py,
+app/services/llm.py) is no longer dormant scaffolding once this milestone
+reviews and extends it (sufficiency scoring, provenance, hybrid
+vector+concept retrieval). See docs/adr/0003-retrieval-pipeline-scope.md
+and docs/adr/0004-ai-provider-strategy.md for the governing decisions this
+router now activates.
 """
 
 from fastapi import APIRouter
 
-from app.api.v1.routes import auth, concepts, documents, workspace
+from app.api.v1.routes import auth, chat, concepts, documents, workspace
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -21,3 +22,5 @@ api_router.include_router(documents.router)
 # ingestion pipeline (documents.router already mounted above); this
 # router is read/merge only.
 api_router.include_router(concepts.router)
+# Milestone 8 (Local-First Retrieval & Provenance).
+api_router.include_router(chat.router)

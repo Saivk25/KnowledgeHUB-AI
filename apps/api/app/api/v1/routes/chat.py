@@ -8,7 +8,7 @@ from app.deps import AppError, get_current_user, get_current_workspace
 from app.models.answer import Answer
 from app.models.citation import Citation
 from app.models.conversation import Conversation, Message
-from app.models.resource import Resource
+from app.models.resource import Resource, ResourceStatus
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.chat import (
@@ -73,7 +73,9 @@ def send_message(
         raise AppError(status.HTTP_404_NOT_FOUND, "CONVERSATION_NOT_FOUND", "Conversation not found.")
 
     ready_doc_count = (
-        db.query(Resource).filter(Resource.workspace_id == workspace.id, Resource.status == "READY").count()
+        db.query(Resource)
+        .filter(Resource.workspace_id == workspace.id, Resource.status == ResourceStatus.READY)
+        .count()
     )
     if ready_doc_count == 0:
         raise AppError(
@@ -86,7 +88,13 @@ def send_message(
     db.add(user_message)
     db.commit()
 
-    result = answer_question(db, workspace_id=workspace.id, question=payload.content)
+    result = answer_question(
+        db,
+        workspace_id=workspace.id,
+        question=payload.content,
+        use_external_fallback=payload.useExternalFallback,
+        allow_external_fallback=workspace.allow_external_fallback,
+    )
 
     assistant_message = Message(conversation_id=conversation.id, role="assistant", content=result.content)
     db.add(assistant_message)
@@ -98,6 +106,10 @@ def send_message(
         retrieval_latency_ms=result.retrieval_latency_ms,
         generation_latency_ms=result.generation_latency_ms,
         status=result.status,
+        provenance=result.provenance,
+        sufficiency_score=result.sufficiency_score,
+        retrieval_confidence=result.retrieval_confidence,
+        sufficiency_reason=result.sufficiency_reason,
     )
     db.add(answer)
     db.flush()
@@ -125,6 +137,10 @@ def send_message(
         answer=AnswerOut(
             id=answer.id,
             status=answer.status,
+            provenance=answer.provenance,
+            sufficiencyScore=answer.sufficiency_score,
+            retrievalConfidence=answer.retrieval_confidence,
+            canOfferExternalFallback=result.can_offer_external_fallback,
             content=result.content,
             citations=[
                 CitationOut(

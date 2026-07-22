@@ -80,7 +80,13 @@ class VectorRepository(ABC):
     def delete_by_concept(self, concept_id: str) -> None: ...
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Shared cosine-similarity helper. Public (not module-private) as of
+    Milestone 8: services/retrieval_service.py needs the identical
+    computation to score a concept-expansion candidate that vector search
+    itself never returned (see that module's `_build_candidates`) -- it
+    imports this rather than reimplementing it, so there is exactly one
+    cosine-similarity formula in the codebase, not two that could drift."""
     dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = sum(x * x for x in a) ** 0.5 or 1.0
     norm_b = sum(y * y for y in b) ** 0.5 or 1.0
@@ -99,7 +105,7 @@ class InMemoryVectorRepository(VectorRepository):
 
     def search(self, query_vector: list[float], workspace_id: str, top_k: int) -> list[SearchResult]:
         candidates = [p for p in self._points.values() if p.workspace_id == workspace_id]
-        scored = [SearchResult(point=p, score=_cosine(query_vector, p.vector)) for p in candidates]
+        scored = [SearchResult(point=p, score=cosine_similarity(query_vector, p.vector)) for p in candidates]
         scored.sort(key=lambda r: r.score, reverse=True)
         return scored[:top_k]
 

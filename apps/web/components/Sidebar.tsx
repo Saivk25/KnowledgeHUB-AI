@@ -5,12 +5,13 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
 // Milestone 3 (Document Ingestion) scope: Documents and Upload Document
-// are now live routes. Milestone 7 (Concept Graph) adds Concepts.
-// "AI Chat" (/chat) is prototyped under app/_future/ but not routable
-// until Milestone 4 -- linking to it here would produce a 404. Add it
-// back to this list in the milestone that ships it.
+// are live routes. Milestone 7 (Concept Graph) adds Concepts. Milestone 8
+// (Local-First Retrieval & Provenance) adds AI Chat -- previously
+// prototyped under app/_future/, now a live route backed by the mounted
+// /api/v1/conversations router.
 const NAV_ITEMS = [
   { href: "/workspace", label: "Workspace Home", icon: "home" },
+  { href: "/chat", label: "AI Chat", icon: "chat" },
   { href: "/documents", label: "Documents", icon: "docs" },
   { href: "/documents/upload", label: "Upload Document", icon: "upload" },
   { href: "/concepts", label: "Concepts", icon: "concept" },

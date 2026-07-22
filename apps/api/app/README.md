@@ -23,21 +23,21 @@ is never ambiguous from a directory listing alone.
 | `services/embeddings.py` (embed/write path), `services/vector_repo.py` (upsert/delete) | 3 -- Document Ingestion | **Yes** |
 | `schemas/document.py`, `api/v1/routes/documents.py` | 3 -- Document Ingestion | **Yes** |
 | `models/concept.py`, `services/concept_linking.py`, `services/concept_graph.py`, `schemas/concept.py`, `api/v1/routes/concepts.py` | 7 -- Concept Graph | **Yes** |
-| `models/conversation.py`, `models/answer.py`, `models/citation.py` | 4 -- RAG Chat | No |
-| `services/embeddings.py` (`embed_one` on a query), `services/vector_repo.py` (`search`), `services/llm.py`, `services/retrieval_service.py` | 4 -- RAG Chat | No |
-| `schemas/chat.py`, `api/v1/routes/chat.py` | 4 -- RAG Chat | No |
-| `api/v1/router.py` | 2/3 (live) / 4 (aggregates the above) | **Yes, partially** -- imports `auth`, `workspace`, and `documents`; `chat` is intentionally left out (see comment in that file) because it transitively imports `app.services.llm`, not wired until Milestone 4 |
+| `models/conversation.py`, `models/answer.py`, `models/citation.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
+| `services/embeddings.py` (`embed_one` on a query), `services/vector_repo.py` (`search`), `services/llm.py`, `services/retrieval_service.py`, `services/sufficiency.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
+| `schemas/chat.py`, `api/v1/routes/chat.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
+| `api/v1/router.py` | 2/3/7/8 (all aggregated here) | **Yes** -- imports `auth`, `workspace`, `documents`, `concepts`, and (as of Milestone 8) `chat` |
 
 Note on `services/embeddings.py` and `services/vector_repo.py`: both files
-are shared between Milestone 3 and Milestone 4, not duplicated. Milestone
+are shared between Milestone 3 and Milestone 8, not duplicated. Milestone
 3 only calls the *write* side of each (`embed()` on chunks at ingest time,
 `upsert()`/`delete_by_document()` on the vector store); the *read* side
 (`embed_one()` on a user's question, `search()` against the vector store)
-is exercised only by `services/retrieval_service.py`, which is not
-imported by anything yet. This is why documents.py could be mounted in
-Milestone 3 without pulling in any Milestone 4 behavior -- the split was
-already at the function level before this milestone started, not
-something this milestone had to introduce.
+is exercised by `services/retrieval_service.py`, mounted as of Milestone 8.
+This is why documents.py could be mounted in Milestone 3 without pulling
+in any Milestone 8 behavior -- the split was already at the function
+level before Milestone 8 started, not something that milestone had to
+introduce.
 
 Note on `workspace.py`: `GET /workspace` still does not return a `stats`
 field (document ready/processing/failed counts). The `Document` model now
@@ -78,26 +78,28 @@ and the confidence-mapping constants) -- never invented. From
 its structured JSON response, unmodified. A confidence of `1.0` on a
 `_confirmed` field means "a human said so," not a model's estimate.
 
-Two consequences of the remaining dormant modules (Milestone 4 only, now)
-are worth being explicit about:
+As of Milestone 8, nothing under `app/` remains dormant -- `chat.py`,
+`retrieval_service.py`, and `llm.py` (with its new
+`answer_general_knowledge` method) are all on the live request path. Two
+things about how they got there are worth keeping visible, since the
+convention below applied to every milestone up to and including this one:
 
-1. **Runtime dependencies stay minimal on purpose.** `requirements.txt`
-   installs Milestone 1 + 2 + 3 dependencies only. `app/services/llm.py`
-   and `app/api/v1/routes/chat.py` will raise `ModuleNotFoundError` or
-   `ImportError` if imported today if they need a package not yet
-   declared -- that is intentional, not a bug, and is exactly what "the
-   Docker image contains only this milestone's runtime dependencies"
-   means in practice. Their dependencies move into `requirements.txt` in
-   the same commit that mounts their router.
+1. **Runtime dependencies stay minimal on purpose.** No new Python
+   packages were required to activate `services/llm.py` and
+   `api/v1/routes/chat.py` -- both already depended only on `httpx`
+   (already installed since Milestone 4's original build) and this
+   codebase's own modules. Their dependencies would have moved into
+   `requirements.txt` in the same commit that mounted their router, had
+   any been needed -- that is what "the Docker image contains only this
+   milestone's runtime dependencies" means in practice.
 2. **`app/core/config.py` is the one exception to "only declare what's
-   used."** Settings fields for later milestones (embedding/LLM provider,
-   OpenAI keys, etc.) are already declared with safe defaults, grouped by
-   milestone in that file. This is deliberate: a dormant module finding a
-   missing settings *field* is a silent landmine (`AttributeError` the
-   moment it's reactivated); a dormant module finding a missing *package*
-   is loud and expected (`ModuleNotFoundError`, fixed by installing it
-   alongside mounting the router). Declaring a config field costs nothing
-   and isn't "implementing" the feature it belongs to.
+   used."** Settings fields for later milestones are declared with safe
+   defaults ahead of the milestone that consumes them, grouped by
+   milestone in that file. A dormant module finding a missing settings
+   *field* is a silent landmine (`AttributeError` the moment it's
+   reactivated); a dormant module finding a missing *package* is loud and
+   expected (`ModuleNotFoundError`). Declaring a config field costs
+   nothing and isn't "implementing" the feature it belongs to.
 
 To activate a milestone: add its dependencies to `requirements.txt`,
 mount its router(s) in `app/api/v1/router.py`, and move its tests out of
@@ -112,11 +114,11 @@ was renamed to `models/resource.py` (`Document` -> `Resource`, table
 `documents` -> `resources` -- see `docs/adr/0011-resource-content-model.md`),
 and schema management moved from `Base.metadata.create_all` to Alembic
 (`alembic/`, see `docs/adr/0010-alembic-migrations.md`). Every file that
-imported the old `Document` model -- including the still-dormant
-`services/retrieval_service.py` and `api/v1/routes/chat.py` -- was updated
-to import `Resource` instead, so the "Mounted in app.main today?" column
-above stays accurate without any dormant module also being a landmine
-against a model that no longer exists.
+imported the old `Document` model -- including `services/retrieval_service.py`
+and `api/v1/routes/chat.py`, both dormant at the time -- was updated to
+import `Resource` instead, so the "Mounted in app.main today?" column
+above stayed accurate without any dormant module also being a landmine
+against a model that no longer existed.
 
 ## Milestone 5 note (Multi-Format Ingestion, per the roadmap's own numbering)
 
@@ -174,3 +176,25 @@ the orphan-prevention check after its cascade delete removes a resource's
 evidence links. See `docs/adr/0014-concept-graph.md` for the full set of
 approved design decisions, including the dedup thresholds, the
 evidence-required rule, and the BackgroundTask-vs-queue re-evaluation.
+
+## Milestone 8 note (Local-First Retrieval & Provenance, per the roadmap's own numbering)
+
+`chat.router` is mounted for the first time -- migration
+`0006_retrieval_provenance` finally creates `conversations`, `messages`,
+`answers`, `citations` (dormant since Milestone 4, per
+`0001_baseline_schema.py`'s own docstring). `services/retrieval_service.py`
+is rewritten, not replaced: Milestone 4's dense-only top-k Qdrant search
+and citation-integrity rule (ADR-0003) are unchanged; new is hybrid
+candidate assembly (raw vector hits + Milestone 7's one-hop
+`find_nearby_concepts()`), an additive ranking formula
+(`vector_similarity + concept_match_boost + metadata_match_boost`), and a
+delegated call to the new `services/sufficiency.py` for the sufficiency
+verdict/score/confidence. `services/llm.py` gained
+`answer_general_knowledge()`, following ADR-0004's exact provider pattern
+(a real answer via `OpenAIChatProvider`, an honest degraded message via
+`ExtractiveFallbackProvider`, never fabricated). `models/answer.py` gained
+`provenance`/`sufficiency_score`/`retrieval_confidence`/`sufficiency_reason`;
+`models/workspace.py` gained `allow_external_fallback` (default `False`).
+See `docs/adr/0015-retrieval-provenance.md` for the full design,
+including the vector-hit ↔ concept-expansion chunk-identity
+reconciliation this milestone's hybrid merge depends on.

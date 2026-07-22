@@ -5,14 +5,20 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import CitationPill from "@/components/CitationPill";
 import SourceViewerModal from "@/components/SourceViewerModal";
-import { api, ApiError, CitationOut } from "@/lib/api";
+import { api, ApiError, CitationOut, Provenance } from "@/lib/api";
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  status?: "OK" | "NO_EVIDENCE" | "ERROR";
+  status?: "OK" | "INSUFFICIENT" | "ERROR";
+  provenance?: Provenance | null;
+  retrievalConfidence?: number;
+  canOfferExternalFallback?: boolean;
   citations?: CitationOut[];
+  // The question this assistant message answered -- kept so the external
+  // fallback confirmation button below can resend it with consent.
+  sourceQuestion?: string;
 }
 
 const SUGGESTIONS = [
@@ -20,6 +26,34 @@ const SUGGESTIONS = [
   "What are the main risks or obligations mentioned?",
   "What is the approval process described here?",
 ];
+
+// Milestone 8 (Local-First Retrieval & Provenance): the one new visual
+// addition alongside every assistant answer, per the approved design ("Only
+// add: provenance badge, retrieval confidence, external fallback
+// confirmation. Do not redesign the interface.").
+function ProvenanceBadge({ provenance, confidence }: { provenance: Provenance | null | undefined; confidence?: number }) {
+  if (!provenance) return null;
+  const styles: Record<Provenance, string> = {
+    LOCAL: "bg-emerald/10 text-emerald-700 border-emerald/30",
+    HYBRID: "bg-amber-100 text-amber-800 border-amber-300",
+    EXTERNAL: "bg-slate-100 text-slate-600 border-slate-300",
+  };
+  const labels: Record<Provenance, string> = {
+    LOCAL: "From your documents",
+    HYBRID: "Documents + general knowledge",
+    EXTERNAL: "General knowledge (not your documents)",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${styles[provenance]}`}
+    >
+      {labels[provenance]}
+      {typeof confidence === "number" && provenance !== "EXTERNAL" && (
+        <span className="opacity-70">· {Math.round(confidence * 100)}% confidence</span>
+      )}
+    </span>
+  );
+}
 
 export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -35,9 +69,6 @@ export default function ChatPage() {
     (async () => {
       try {
         const ws = await api.getWorkspace();
-        // `stats` doesn't exist on the response until Milestone 3 (see
-        // lib/api.ts) -- this screen is still dormant, so this is just
-        // enough to keep the whole project type-checking cleanly.
         setReadyCount(ws.stats?.readyDocuments ?? 0);
         const conv = await api.createConversation();
         setConversationId(conv.id);
@@ -51,16 +82,18 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, phase]);
 
-  const send = async (content: string) => {
+  const send = async (content: string, useExternalFallback = false) => {
     if (!conversationId || !content.trim()) return;
     setError(null);
     setInput("");
-    setMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: "user", content }]);
+    if (!useExternalFallback) {
+      setMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: "user", content }]);
+    }
     setPhase("searching");
     setTimeout(() => setPhase((p) => (p === "searching" ? "generating" : p)), 500);
 
     try {
-      const res = await api.sendMessage(conversationId, content);
+      const res = await api.sendMessage(conversationId, content, useExternalFallback);
       setMessages((prev) => [
         ...prev,
         {
@@ -68,7 +101,11 @@ export default function ChatPage() {
           role: "assistant",
           content: res.answer.content,
           status: res.answer.status,
+          provenance: res.answer.provenance,
+          retrievalConfidence: res.answer.retrievalConfidence,
+          canOfferExternalFallback: res.answer.canOfferExternalFallback,
           citations: res.answer.citations,
+          sourceQuestion: content,
         },
       ]);
     } catch (err) {
@@ -122,12 +159,30 @@ export default function ChatPage() {
                       m.role === "user" ? "bg-indigo text-white" : "border border-edge bg-surface text-ink"
                     }`}
                   >
+                    {m.role === "assistant" && m.provenance && (
+                      <div className="mb-2">
+                        <ProvenanceBadge provenance={m.provenance} confidence={m.retrievalConfidence} />
+                      </div>
+                    )}
                     <p className="whitespace-pre-wrap">{m.content}</p>
                     {m.citations && m.citations.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1.5 border-t border-edge pt-3">
                         {m.citations.map((c) => (
                           <CitationPill key={c.order} citation={c} onOpen={setActiveCitation} />
                         ))}
+                      </div>
+                    )}
+                    {/* Milestone 8: external fallback confirmation -- only ever
+                        offered, never assumed, when local evidence is
+                        insufficient (approved design: fail closed). */}
+                    {m.role === "assistant" && m.status === "INSUFFICIENT" && m.canOfferExternalFallback && (
+                      <div className="mt-3 border-t border-edge pt-3">
+                        <button
+                          onClick={() => m.sourceQuestion && send(m.sourceQuestion, true)}
+                          className="rounded-lg border border-indigo px-3 py-1.5 text-xs font-medium text-indigo hover:bg-indigo/5"
+                        >
+                          Answer using general knowledge instead
+                        </button>
                       </div>
                     )}
                   </div>

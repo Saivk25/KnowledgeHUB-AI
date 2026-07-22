@@ -94,6 +94,29 @@ class Settings(BaseSettings):
     # independent of the visited-node guard (DRR Section 11):
     MAX_TRAVERSAL_DEPTH: int = 5
 
+    # -- Milestone 8 (Local-First Retrieval & Provenance) -- read by
+    # app/services/sufficiency.py and app/services/retrieval_service.py.
+    # Ranking formula (approved design; ADR-0003 kept intact -- additive
+    # boosts on top of dense similarity, no BM25/reranker/learned ranking):
+    CONCEPT_MATCH_BOOST: float = 0.15
+    METADATA_MATCH_BOOST: float = 0.10
+    # One-hop concept expansion width (approved design: no recursive
+    # traversal during retrieval -- see concept_graph.find_nearby_concepts).
+    CONCEPT_EXPANSION_TOP_K: int = 5
+    # Sufficiency scorer thresholds (DRR Section 10 -- fail-closed by
+    # construction; a candidate list scoring below SUFFICIENCY_MIN_SCORE
+    # is never labeled Local, regardless of any other signal). See
+    # app/services/sufficiency.py for how these combine.
+    SUFFICIENCY_MIN_SCORE: float = 0.35
+    SUFFICIENCY_STRONG_SCORE: float = 0.75
+    SUFFICIENCY_SECONDARY_FLOOR: float = 0.20
+    SUFFICIENCY_MIN_SUPPORTING_HITS: int = 2
+    # DRR Section 5: the first concrete, testable retrieval latency target
+    # in this codebase ("reasonable latency" was not testable before this).
+    # Local-only answer, P95. Used by tests, not enforced by any runtime
+    # code path.
+    RETRIEVAL_LATENCY_TARGET_MS: int = 2000
+
 
 @lru_cache
 def get_settings() -> Settings:

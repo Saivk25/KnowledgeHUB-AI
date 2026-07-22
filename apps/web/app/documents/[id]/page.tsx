@@ -141,11 +141,12 @@ export default function DocumentDetailPage() {
               <div className="mt-6 space-y-4">
                 <div className="rounded-lg border border-emerald/30 bg-emerald/10 px-4 py-3 text-sm text-emerald-700">
                   This document is ready — {document.pageCount} pages indexed.
-                  {/* Milestone 3 (Document Ingestion): no link to /chat here -- that route
-                      isn't mounted until Milestone 4 (RAG Chat). Being indexed and queryable
-                      are two different milestones' deliverables. */}
+                  {/* Milestone 8 (Local-First Retrieval & Provenance): /chat is a
+                      live route now that indexing and retrieval are both shipped. */}
                   <div className="mt-3 text-xs text-emerald-600/80">
-                    Asking questions about this document arrives in Milestone 4.
+                    <Link href="/chat" className="font-medium text-emerald-700 hover:underline">
+                      Ask a question about this document
+                    </Link>
                   </div>
                 </div>
 
