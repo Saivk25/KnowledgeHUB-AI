@@ -2,107 +2,167 @@
 
 **Your Organization's Intelligence, Instantly Searchable.**
 
-> **Status: Milestone 3 -- Document Upload & Ingestion.** This README
-> describes only what exists right now. RAG chat with citations is
-> specified in the frozen SRS and will be built in the milestone that
-> follows, after review. See [Roadmap](#roadmap) below.
+> **Status: Milestone 8 of 12 -- Local-First Retrieval & Provenance --
+> frozen and tagged `v0.8.0-local-first-retrieval`.** Milestones 1-8 are
+> implemented, verified, and frozen. This README has two parts: **Part 1**
+> describes the finished product this project is building toward; **Part
+> 2** describes exactly what exists in this repository right now. See
+> [Roadmap](#roadmap) for everything still ahead.
 
-## What this milestone proves
+---
 
-A real, working ingestion pipeline: upload a PDF into your own workspace,
-watch it move from `QUEUED` through extraction and indexing to `READY`,
-and have its text genuinely chunked, embedded, and stored in Qdrant --
-scoped to your workspace and nobody else's -- on top of the Milestone 2
-authentication foundation. Nothing in this milestone reads that index
-back yet; that's Milestone 4.
+## Part 1 -- The Vision: What This Becomes When Complete
 
-## What's included
+KnowledgeHub AI is being built against one litmus test: *would someone
+actually open it instead of Google Drive, Notion, Obsidian, or ChatGPT?*
+Not "does it store files" or "can it answer questions" -- those are table
+stakes. The test is whether it becomes the place someone goes first when
+they need to think with what they already know.
 
-- Monorepo layout (`apps/api`, `apps/web`)
-- FastAPI backend: CORS (`GET`/`POST`/`PATCH`/`DELETE`, credentials
-  enabled for the session cookie), structured logging, generic error
-  handling, liveness/readiness endpoints
-- Authentication + workspace (Milestone 2, unchanged): register, login,
-  logout, profile, workspace rename -- all still live and tested
-- Document upload & ingestion (this milestone):
-  - `POST /api/v1/documents` -- accepts a PDF, returns immediately with
-    `status: "QUEUED"`; validates file type, size (`MAX_UPLOAD_MB`,
-    default 25), and rejects empty files or exact duplicate re-uploads
-    (by content checksum) within the same workspace
-  - Ingestion runs as a FastAPI `BackgroundTask` (ADR-0005):
-    **extract** (PyMuPDF native text layer) -> **chunk** (page-aware,
-    ~500-token chunks with overlap, so every chunk still maps to exactly
-    one page) -> **embed** (pluggable provider, defaults to a
-    zero-config local hashing embedder; swaps to OpenAI's embeddings API
-    by setting `OPENAI_API_KEY` and `EMBEDDING_PROVIDER=openai`) ->
-    **index** (upsert into Qdrant, payload-filtered by `workspace_id`)
-  - `GET /api/v1/documents` (list), `GET /api/v1/documents/{id}` (detail
-    + processing-job status), `GET /api/v1/documents/{id}/file`
-    (download the original PDF), `DELETE /api/v1/documents/{id}`
-    (removes DB rows, vector points, and the stored file),
-    `POST /api/v1/documents/{id}/retry` (only for `FAILED` documents)
-  - Document metadata (filename, status, page count, size, checksum,
-    error message) lives in PostgreSQL; extracted page text and chunks
-    live in their own tables (`document_pages`, `document_chunks`) so
-    Milestone 4's retrieval path can query them directly
-  - Scanned/image-only PDFs (no extractable text) fail fast with a clear
-    `SCANNED_PDF_UNSUPPORTED` error rather than silently indexing nothing
-    (ADR-0006 -- no OCR in this MVP)
-  - Next.js: a documents library (search, status chips, delete), an
-    upload screen (drag-and-drop, client-side validation), and a detail
-    screen that polls and shows live ingestion progress
-- All document endpoints have explicit Pydantic `response_model`s and
-  OpenAPI `summary`/`description`s, matching Milestone 2's pattern
-- Docker Compose: added a named `api_storage` volume so uploaded files
-  survive `docker compose down`/rebuilds, same as `postgres_data`/
-  `qdrant_data` already do
-- CI: unchanged commands (`pytest`, `ruff`, `black --check`,
-  `tsc --noEmit`, `next build`) now exercise the ingestion pipeline too
+Three consequences follow from that:
 
-## What's deliberately not included yet
+- **The unit of value is a concept understood, not a file stored.**
+  Uploading a PDF isn't the point -- extracting what's *in* it, linking it
+  to everything else the user already knows, and being able to explain
+  it back is the point. The primary landing surface is meant to end up
+  being a concept map / concept list ("here's what you know things
+  about"), with the document library demoted to a secondary "Evidence"
+  view for provenance auditing -- the same relationship Google Drive has
+  to a well-organized Notion.
+- **The system has to know things about the user, not just about their
+  documents.** A personal learning layer tracks what's been exposed,
+  self-reported, and tested -- building toward a real mastery signal per
+  concept, not just "this file was uploaded once."
+- **The system occasionally has to speak first.** Proactive surfacing --
+  resurfacing a concept before a quiz, flagging a contradiction between
+  two sources -- rather than only ever waiting to be asked.
 
-No retrieval, no chat, no citations, no LLM question answering -- see
-Milestone 4. `app/api/v1/router.py` mounts `auth`, `workspace`, and
-`documents`, but not `chat`; the corresponding Next.js chat screen still
-sits in `app/_future/` (see
-[`apps/web/app/_future/README.md`](apps/web/app/_future/README.md)).
-`app/services/embeddings.py` and `app/services/vector_repo.py` are
-already shared with Milestone 4 (see
-[`apps/api/app/README.md`](apps/api/app/README.md)), but only their
-*write* paths (embed a chunk, upsert/delete a vector) are exercised this
-milestone -- their *read* paths (embed a question, search the vector
-store) belong to `app/services/retrieval_service.py`, which nothing
-imports yet. This split was already at the function level before this
-milestone started, which is exactly what makes Milestone 4 "consume
-without architectural changes" possible.
+**When finished, the product does the following:**
 
-## Security posture for this milestone
+- **Ingests almost anything**, not just PDFs: DOCX, PPTX, plain text and
+  Markdown, source code files, YouTube transcripts, and OCR'd handwritten
+  notes or slide photos -- all through the same extractor/chunker/
+  embedding pipeline, each format an additive plugin rather than a
+  special case.
+- **Classifies and organizes automatically** -- source type, subject, and
+  topic suggestions with honest confidence scores, and a manual
+  correction flow when the system gets it wrong.
+- **Builds a real concept graph**, not just a flat document index --
+  concepts and the relationships between them, linked back to the exact
+  chunk of evidence that justified each link, so "why does the system
+  think X relates to Y" is always answerable.
+- **Answers questions from what it actually knows first.** Retrieval is
+  local-first: dense vector search plus concept-graph expansion against
+  the user's own workspace, with a fail-closed sufficiency scorer
+  deciding whether the local evidence is actually enough before ever
+  answering. Every answer carries a structural provenance label -- purely
+  Local, Local+concept-graph (Hybrid), or External general knowledge --
+  and falling outside the user's own documents always requires their
+  explicit, revocable consent. Nothing invented is ever presented as if
+  it came from the user's own material.
+- **Supports real workflows, not just Q&A**: Explain, Compare, Summarize,
+  and Search as first-class intents, followed by structured study
+  workflows -- Quiz me, Flashcards, Viva mode, Revision mode, a study
+  planner -- each with its own contract and prompt template, building on
+  proven retrieval rather than bolting study features onto raw chat.
+- **Makes capture as important as retrieval.** A universal capture
+  surface -- quick notes, pasted text, copied code, screenshots -- reuses
+  the same extraction and chunking pipeline documents use, so anything
+  captured is immediately part of the same searchable, linkable
+  knowledge base.
+- **Surfaces its own confidence everywhere**, not just at answer time --
+  OCR confidence, classification confidence, retrieval confidence -- each
+  with a correction flow that actually feeds back into stored metadata.
 
-Everything from Milestone 2's security posture still holds (password
-hashing, session cookie flags, validation-error redaction, workspace
-isolation, no hardcoded secrets, no debug flags, minimal runtime
-dependencies -- see `docs/` history for the full list). New this
-milestone:
+Architecturally, the finished system stays deliberately small: Postgres
+and Qdrant, not a dedicated graph database, for as long as recursive CTEs
+and clean indexing can carry the concept graph; plugin registries for
+extraction/classification/chunking instead of growing if/elif chains;
+the sufficiency scorer as its own named, independently tested module,
+never a magic threshold buried in a retrieval call; and provenance
+enforced at the type level, so it's structurally impossible to construct
+an answer without one. The full rationale for each of these lives in
+[`docs/adr/`](docs/adr/) and in the governing architecture and roadmap
+document this repository is built against.
 
-- Every document route resolves "whose document" strictly from the
-  authenticated session's workspace (no cross-workspace id guessing is
-  possible); a document that doesn't exist or belongs to another
-  workspace returns the same 404 `DOCUMENT_NOT_FOUND` either way.
-- Upload validates content type, size, and non-emptiness before anything
-  touches disk or the database. `MAX_UPLOAD_MB` is enforced server-side,
-  not just as a client-side UI hint.
-- `workspaces.owner_user_id` was already indexed (Milestone 2 audit);
-  this milestone adds an index on `documents.checksum` for the same
-  reason -- duplicate-detection runs a `(workspace_id, checksum)`
-  lookup on every upload.
-- PyMuPDF's wheel bundles MuPDF statically; empirically verified to need
-  no extra OS packages in the `python:3.11-slim` runtime image for text
-  extraction, so none were added (kept the "runtime images stay
-  dependency-minimal" property from the Milestone 1 audit).
-- `httpx` (imported directly by `app/services/embeddings.py` for the
-  optional OpenAI provider) is now declared explicitly in
-  `requirements.txt` rather than relied upon as a transitive dependency
-  of `qdrant-client`.
+---
+
+## Part 2 -- What's Actually Built So Far (Through Milestone 8)
+
+Everything below is real, implemented, tested, and frozen -- not a plan.
+
+### Milestone-by-milestone
+
+- **M1 -- Project Foundation** (`v0.1.0-foundation`): FastAPI + Next.js
+  monorepo, Docker Compose, Postgres, Qdrant, health/readiness checks.
+- **M2 -- Authentication & Workspace** (`v0.2.0-authentication`):
+  registration, login, logout, session cookies, per-user workspace
+  creation and isolation.
+- **M3 -- Document Upload & Ingestion** (`v0.3.0-document-ingestion`): PDF
+  upload, background extraction (PyMuPDF), page-aware chunking, pluggable
+  embeddings, Qdrant indexing scoped per workspace.
+- **M4 -- Resource Model** (`v0.4.0-resource-model`): `Document` replaced
+  by a polymorphic `Resource` model; schema management moved from
+  `create_all` to real Alembic migrations.
+- **M5 -- Multi-Format Ingestion** (`v0.5.0-multi-format-ingestion`):
+  DOCX, PPTX, TXT/Markdown, code files, YouTube transcripts, and
+  image-OCR extractors added via an `Extractor` registry.
+- **M6 -- Metadata, Classification & Confidence**
+  (`v0.6.0-metadata-classification`): automatic source-type and
+  subject/topic classification with stored confidence scores, plus a
+  manual-correction workflow.
+- **M7 -- Concept Graph** (`v0.7.0-concept-graph`): `concepts` /
+  `resource_concepts` / `concept_relationships` schema, incremental
+  concept-linking on ingestion, cycle-safe traversal, browse-by-concept
+  UI.
+- **M8 -- Local-First Retrieval & Provenance**
+  (`v0.8.0-local-first-retrieval`, current):
+  - Hybrid retrieval: dense vector search plus one-hop concept-graph
+    expansion, merged and deduplicated by real chunk identity.
+  - A standalone, independently tested sufficiency scorer
+    (`app/services/sufficiency.py`) -- fail-closed by construction, so a
+    query with zero relevant local content can never be labeled Local.
+  - Structural provenance on every answer (`LOCAL` / `HYBRID` /
+    `EXTERNAL`), with workspace-level and per-request consent gates
+    before any external model call is ever made.
+  - Chat reactivated end-to-end: `/api/v1/conversations` mounted, and
+    `apps/web/app/chat/` live with a provenance badge, retrieval
+    confidence, and an explicit external-fallback confirmation control.
+  - Verified: 144 tests passing, 0 failing, 3 skipped (pending future
+    milestones); Ruff and Black clean on every file this milestone
+    touched. Full record in
+    [`docs/milestones/MILESTONE_8.md`](docs/milestones/MILESTONE_8.md)
+    and [`docs/adr/0015-retrieval-provenance.md`](docs/adr/0015-retrieval-provenance.md).
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the itemized Added/Changed/Fixed
+list behind every tag above.
+
+### What you can actually do with it today
+
+- Register, log in, and get an isolated personal workspace.
+- Upload PDFs, Word docs, PowerPoint decks, text/Markdown files, code
+  files, YouTube URLs, and scanned/handwritten images -- all get
+  extracted, chunked, embedded, classified, and concept-linked
+  automatically.
+- Browse your documents by concept, not just by filename.
+- Ask questions in the chat UI and get answers that are honest about
+  where they came from: answered from your own documents (Local),
+  answered from your documents plus their linked concepts (Hybrid), or --
+  only with your explicit consent -- answered from general knowledge
+  when your own documents genuinely don't have enough (External).
+
+### What's deliberately not built yet
+
+- No Explain / Compare / Summarize / Search intent workflows (M9) -- chat
+  today is plain question-answering with citations and provenance, not
+  yet intent-routed.
+- No study workflows -- quiz mode, flashcards, spaced repetition, a study
+  planner (M10).
+- No dedicated confidence/correction UI surfaces beyond what M6 already
+  exposes for classification (M11).
+- No production hardening pass -- queue-vs-BackgroundTask re-evaluation
+  under real load, embedding-version migration tooling, full seed data,
+  demo script (M12).
 
 ## Running it locally
 
@@ -128,10 +188,11 @@ No `.env` file is required to run the Docker Compose stack locally.
 cd apps/api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 # Falls back to SQLite automatically if DATABASE_URL is unset -- see
 # app/core/config.py. Qdrant reachability will show as "down" in
-# /health/ready unless a Qdrant instance is actually running -- ingestion
+# /health/ready unless a Qdrant instance is actually running -- retrieval
 # still works in that case, falling back to an in-memory vector store
 # (see app/services/vector_repo.get_vector_repository).
 
@@ -141,41 +202,12 @@ npm install
 npm run dev
 ```
 
-## Manual test cases
-
-1. `docker compose up --build`, then open http://localhost:3000, register
-   an account, and land on `/workspace`.
-2. Go to Documents -> Upload a PDF. The upload returns immediately and the
-   document shows as processing; within a few seconds it reaches
-   **Ready** with a real page count.
-3. Open the ready document's detail page -- it shows the page count and a
-   note that asking questions about it arrives in Milestone 4 (no dead
-   link to a chat screen that doesn't exist yet).
-4. Try uploading the exact same PDF again -- rejected with 409
-   `DUPLICATE_DOCUMENT`. Try uploading a `.txt` file -- rejected with 422
-   `UNSUPPORTED_FILE_TYPE`. Try uploading an empty file -- rejected with
-   422 `EMPTY_FILE`.
-5. Upload a PDF with no extractable text (e.g. export a blank page to
-   PDF) -- it reaches **Failed** with a clear "appears to be a scanned
-   image" message, not a silent empty index. Click "Retry Processing" --
-   it fails again the same way, deterministically.
-6. Delete a document from the library -- it disappears from the list
-   immediately; re-uploading the same file afterward succeeds (no longer
-   a duplicate).
-7. Register a second, separate account and confirm it cannot see, open,
-   download, or delete the first account's documents (404 either way).
-8. `curl http://localhost:8000/health` and `/health/ready` still behave
-   exactly as in Milestone 1/2 (see those milestones' test cases).
-9. Visiting a not-yet-built route (e.g. http://localhost:3000/chat or
-   http://localhost:8000/api/v1/conversations) still returns a 404,
-   confirming Milestone 4 is not silently half-available.
-
 ## Testing
 
 ```bash
 cd apps/api
 pip install -r requirements-dev.txt
-pytest -q      # 36 passed, 3 skipped (deferred to Milestone 4)
+pytest -q      # 144 passed, 3 skipped
 ruff check app tests
 black --check app tests
 ```
@@ -187,31 +219,6 @@ npx tsc --noEmit
 npm run build
 ```
 
-## Assumptions
-
-- Ingestion runs as an in-process FastAPI `BackgroundTask`, not a
-  separate worker queue (ADR-0005). If the API process crashes mid-job,
-  that document's `IngestionJob` row is left `RUNNING` and the document
-  stays `PROCESSING` forever until manually retried or cleaned up --
-  acceptable for local/demo use, not yet a production guarantee.
-- No OCR: PDFs with no extractable text layer fail with
-  `SCANNED_PDF_UNSUPPORTED` rather than being processed (ADR-0006).
-- The zero-config default embedding provider (`LocalHashEmbeddingProvider`)
-  is lexical (hashed bag-of-words), not deep-semantic -- it rewards
-  vocabulary overlap between a query and a chunk, which is sufficient for
-  the seeded demo corpus and this milestone's scope (there is no query
-  path yet to evaluate retrieval quality against). Swapping to
-  `EMBEDDING_PROVIDER=openai` is a config change, not a code change.
-- Uploaded files are stored on local disk (`STORAGE_DIR`, ADR-0007)
-  inside a named Docker volume (`api_storage`) so they survive container
-  rebuilds; they are not yet backed by S3 or any object store.
-- `GET /workspace` still does not return a `stats` field -- see
-  `apps/api/app/README.md` for why that's a deliberate scope choice, not
-  an oversight.
-- Schema changes still use `Base.metadata.create_all` rather than Alembic
-  migrations (ADR-0008); acceptable while there's no production data yet
-  to migrate around.
-
 ## Repository layout
 
 ```
@@ -219,49 +226,62 @@ knowledgehub-ai/
 ├── apps/
 │   ├── api/
 │   │   ├── app/
-│   │   │   ├── README.md                  # module -> milestone map
-│   │   │   ├── api/routes/health.py        # Milestone 1 -- live
-│   │   │   ├── api/v1/routes/auth.py       # Milestone 2 -- live
-│   │   │   ├── api/v1/routes/workspace.py  # Milestone 2 -- live
-│   │   │   ├── api/v1/routes/documents.py  # Milestone 3 -- live
-│   │   │   ├── api/v1/routes/chat.py       # Milestone 4 -- not mounted
-│   │   │   ├── services/storage.py, extraction.py, chunking.py,
-│   │   │   │   ingestion_service.py        # Milestone 3 -- live
-│   │   │   ├── services/embeddings.py, vector_repo.py  # write path:
-│   │   │   │   Milestone 3 -- live; read path: Milestone 4 -- not used
-│   │   │   ├── services/llm.py, retrieval_service.py    # Milestone 4
+│   │   │   ├── README.md                       # module -> milestone map
+│   │   │   ├── api/routes/health.py             # M1 -- live
+│   │   │   ├── api/v1/routes/auth.py            # M2 -- live
+│   │   │   ├── api/v1/routes/workspace.py       # M2 -- live
+│   │   │   ├── api/v1/routes/documents.py       # M3/M5 -- live
+│   │   │   ├── api/v1/routes/chat.py            # M8 -- live
+│   │   │   ├── services/storage.py, extraction.py,
+│   │   │   │   chunking.py, ingestion_service.py    # M3/M5 -- live
+│   │   │   ├── services/embeddings.py, vector_repo.py  # M3/M8 -- live
+│   │   │   ├── services/classification.py       # M6 -- live
+│   │   │   ├── services/concept_linking.py, concept_graph.py  # M7 -- live
+│   │   │   ├── services/llm.py, retrieval_service.py,
+│   │   │   │   sufficiency.py                    # M8 -- live
 │   │   │   ├── core/, db/, models/, schemas/
 │   │   │   └── main.py
+│   │   ├── alembic/versions/                     # M4-M8 migrations
 │   │   └── tests/
 │   └── web/
 │       ├── app/
-│       │   ├── page.tsx, layout.tsx        # Milestone 1 -- live
-│       │   ├── login/, register/, workspace/, settings/  # Milestone 2
-│       │   ├── documents/                  # Milestone 3 -- live
-│       │   └── _future/chat/               # Milestone 4 -- not routed
+│       │   ├── page.tsx, layout.tsx              # M1 -- live
+│       │   ├── login/, register/, workspace/, settings/  # M2
+│       │   ├── documents/                        # M3/M5/M6 -- live
+│       │   ├── concepts/                         # M7 -- live
+│       │   └── chat/                             # M8 -- live
 │       ├── components/, lib/
 ├── docs/
-│   ├── adr/            # architecture decision records
+│   ├── adr/                # architecture decision records, 0001-0015
+│   ├── milestones/          # per-milestone design/implementation/verification
 │   └── architecture/
-├── demo-data/           # sample PDFs prepared for the ingestion milestone
+├── demo-data/                # sample source files across supported formats
+├── CHANGELOG.md
 ├── docker-compose.yml
 └── .github/workflows/ci.yml
 ```
 
 ## Roadmap
 
-| Milestone | Scope | Status |
-|---|---|---|
-| 1 | Project foundation: monorepo, Docker Compose, Postgres, Qdrant, health checks | Frozen (`v0.1.0-foundation`) |
-| 2 | Authentication + workspace | Frozen (`v0.2.0-authentication`) |
-| 3 | Document upload + ingestion pipeline | **Current** |
-| 4 | RAG chat with page-level citations | Not started |
-| 5 | Source Viewer + UX polish | Not started |
-| 6 | Portfolio release: seed data, docs, demo | Not started |
+| # | Milestone | Scope | Status |
+|---|---|---|---|
+| 1 | Project Foundation | Monorepo, Docker Compose, Postgres, Qdrant, health checks | Frozen (`v0.1.0-foundation`) |
+| 2 | Authentication & Workspace | Login, sessions, per-user workspace isolation | Frozen (`v0.2.0-authentication`) |
+| 3 | Document Upload & Ingestion | PDF extraction, chunking, embedding, indexing | Frozen (`v0.3.0-document-ingestion`) |
+| 4 | Resource Model | Polymorphic `Resource`, Alembic migrations | Frozen (`v0.4.0-resource-model`) |
+| 5 | Multi-Format Ingestion | DOCX, PPTX, TXT/MD, code, YouTube, image OCR | Frozen (`v0.5.0-multi-format-ingestion`) |
+| 6 | Metadata, Classification & Confidence | Auto-classification with confidence + correction UI | Frozen (`v0.6.0-metadata-classification`) |
+| 7 | Concept Graph | Concepts, relationships, incremental linking, browse UI | Frozen (`v0.7.0-concept-graph`) |
+| 8 | Local-First Retrieval & Provenance | Hybrid retrieval, sufficiency scorer, provenance, consent-gated fallback | **Frozen -- current** (`v0.8.0-local-first-retrieval`) |
+| 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | Not started |
+| 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | Not started |
+| 11 | Confidence & Correction UX | Dedicated UI for OCR/classification/retrieval confidence | Not started |
+| 12 | Production Hardening & Portfolio Polish | Queue re-evaluation, embedding migrations, seed data, docs, demo | Not started |
 
-Detailed architecture decisions for the whole system (already reviewed and
-frozen in the SRS) live in [`docs/adr/`](docs/adr/) -- they describe where
-the project is going even though most of that code isn't wired in yet.
+Detailed architecture decisions for the whole system live in
+[`docs/adr/`](docs/adr/); per-milestone design, implementation, and
+verification records live in
+[`docs/milestones/`](docs/milestones/).
 
 ## License
 
