@@ -5,6 +5,51 @@ frozen milestone. Each entry links to that milestone's full design/
 implementation/verification record under `docs/milestones/`; this file is
 a summary index, not a replacement for those documents.
 
+## [v0.9.0-intent-workflows] -- Intent Workflows
+
+See `docs/milestones/MILESTONE_9.md` for the full implementation and
+verification record.
+
+### Added
+- `app/services/intents/`: an `IntentHandler` plugin registry (mirroring
+  the `Extractor`/`Classifier`/`ConceptLinker` pattern) with one class
+  per intent -- `ExplainIntent`, `SearchIntent`, `SummarizeIntent`,
+  `CompareIntent` -- and a `registry.get_intent_handler()` lookup, rather
+  than a branching dispatcher.
+- Shared `IntentRequest`/`IntentResponse` envelope
+  (`app/schemas/intents.py`), discriminated on `result.kind`, satisfying
+  DRR Section 4's "define the envelope before the first intent" mandate.
+- `POST /api/v1/conversations/{id}/intents` -- the one real dispatch
+  route for all four intents.
+- Search: always returns ranked hits with zero sufficiency gating;
+  additionally calls the LLM for a grounded, clearly-labeled
+  `assistedSynthesis` only when the top result's confidence is below
+  `SEARCH_LLM_CONFIDENCE_THRESHOLD`.
+- Summarize: resource-target, concept-target, and freeform-question
+  modes, the last going through the same sufficiency gate Explain uses.
+- Compare: 2-4 targets (resource, concept, or freeform per target);
+  partial evidence gaps are labeled honestly rather than silently
+  filled; total insufficiency behaves like Explain's insufficient case.
+- `Answer.intent`/`Answer.intent_payload` and `Citation.target_label`
+  columns (migration `0007_intent_workflows.py`).
+- `LLMProvider.summarize()`/`compare()` on both `OpenAIChatProvider` and
+  `ExtractiveFallbackProvider`.
+- Frontend: an Explain/Search toggle in chat, a Summarize panel on
+  document and concept detail pages, and a multi-select Compare flow on
+  the concepts list.
+
+### Changed
+- `POST /api/v1/conversations/{id}/messages` (Milestone 8) is now a thin
+  EXPLAIN-only wrapper over the same intent dispatch path -- unchanged
+  from the frontend's point of view, per DRR Section 8's "one contract,
+  thin wrapper" principle.
+- `services/retrieval_service.py` refactored (behavior unchanged):
+  shared resource-target/concept-target/freeform evidence-resolution
+  helpers extracted for reuse by Summarize and Compare.
+
+See `docs/adr/0016-intent-workflows.md` for the full design and
+`docs/milestones/MILESTONE_9.md` for the complete implementation record.
+
 ## [v0.8.0-local-first-retrieval] -- Local-First Retrieval & Provenance
 
 See `docs/milestones/MILESTONE_8.md` for the full implementation and

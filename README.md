@@ -8,16 +8,16 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](apps/api/requirements.txt)
 [![Next.js](https://img.shields.io/badge/frontend-Next.js-black.svg)](apps/web/package.json)
 
-> **Status: Milestone 8 of 12 -- Local-First Retrieval & Provenance --
-> frozen and tagged `v0.8.0-local-first-retrieval`.** Milestones 1-8 are
-> implemented, verified, and frozen. This README has two parts: **Part 1**
-> describes the finished product this project is building toward; **Part
-> 2** describes exactly what exists in this repository right now.
+> **Status: Milestone 9 of 12 -- Intent Workflows -- frozen and tagged
+> `v0.9.0-intent-workflows`.** Milestones 1-9 are implemented, verified,
+> and frozen. This README has two parts: **Part 1** describes the
+> finished product this project is building toward; **Part 2** describes
+> exactly what exists in this repository right now.
 
 ## Contents
 
 - [Part 1 -- The Vision](#part-1----the-vision-what-this-becomes-when-complete)
-- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-8)
+- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-9)
 - [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
@@ -106,7 +106,7 @@ document this repository is built against.
 
 ---
 
-## Part 2 -- What's Actually Built So Far (Through Milestone 8)
+## Part 2 -- What's Actually Built So Far (Through Milestone 9)
 
 Everything below is real, implemented, tested, and frozen -- not a plan.
 
@@ -135,7 +135,7 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
   concept-linking on ingestion, cycle-safe traversal, browse-by-concept
   UI.
 - **M8 -- Local-First Retrieval & Provenance**
-  (`v0.8.0-local-first-retrieval`, current):
+  (`v0.8.0-local-first-retrieval`):
   - Hybrid retrieval: dense vector search plus one-hop concept-graph
     expansion, merged and deduplicated by real chunk identity.
   - A standalone, independently tested sufficiency scorer
@@ -147,11 +147,32 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
   - Chat reactivated end-to-end: `/api/v1/conversations` mounted, and
     `apps/web/app/chat/` live with a provenance badge, retrieval
     confidence, and an explicit external-fallback confirmation control.
-  - Verified: 144 tests passing, 0 failing, 3 skipped (pending future
+- **M9 -- Intent Workflows** (`v0.9.0-intent-workflows`, current):
+  - Four distinct intents -- Explain, Search, Summarize, Compare -- each
+    its own `IntentHandler` in a plugin registry
+    (`app/services/intents/`), not a branching dispatcher, sharing common
+    retrieval/evidence-resolution helpers.
+  - One shared envelope (`IntentRequest`/`IntentResponse`, discriminated
+    on a `result.kind` union) via `POST /conversations/{id}/intents` --
+    the existing `POST /messages` (M8) becomes a thin EXPLAIN-only
+    wrapper over the same dispatch path, per DRR Section 4's "define the
+    envelope before the first intent" mandate.
+  - Search always returns its ranked hit list with zero gating, and only
+    additionally calls the LLM for a grounded, clearly-labeled synthesis
+    when the top result's confidence is below a configurable threshold.
+  - Summarize supports resource-target, concept-target, and freeform
+    modes; Compare supports 2-4 targets with partial-evidence gaps
+    honestly labeled rather than silently filled, keeping the existing
+    3-value `LOCAL`/`HYBRID`/`EXTERNAL` provenance contract unchanged.
+  - Frontend: an Explain/Search toggle in chat, a Summarize panel on
+    document and concept detail pages, and a multi-select Compare flow
+    on the concepts list.
+  - Verified: 161 tests passing, 0 failing, 3 skipped (pending future
     milestones); Ruff and Black clean on every file this milestone
-    touched. Full record in
-    [`docs/milestones/MILESTONE_8.md`](docs/milestones/MILESTONE_8.md)
-    and [`docs/adr/0015-retrieval-provenance.md`](docs/adr/0015-retrieval-provenance.md).
+    touched; Docker Compose smoke test and frontend build both green.
+    Full record in
+    [`docs/milestones/MILESTONE_9.md`](docs/milestones/MILESTONE_9.md)
+    and [`docs/adr/0016-intent-workflows.md`](docs/adr/0016-intent-workflows.md).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the itemized Added/Changed/Fixed
 list behind every tag above.
@@ -169,12 +190,12 @@ list behind every tag above.
   answered from your documents plus their linked concepts (Hybrid), or --
   only with your explicit consent -- answered from general knowledge
   when your own documents genuinely don't have enough (External).
+- Switch chat between Explain and Search modes, get a one-click Summarize
+  of any document or concept, and multi-select 2-4 concepts to Compare --
+  each with the same provenance and citation honesty as Explain.
 
 ### What's deliberately not built yet
 
-- No Explain / Compare / Summarize / Search intent workflows (M9) -- chat
-  today is plain question-answering with citations and provenance, not
-  yet intent-routed.
 - No study workflows -- quiz mode, flashcards, spaced repetition, a study
   planner (M10).
 - No dedicated confidence/correction UI surfaces beyond what M6 already
@@ -231,7 +252,7 @@ Full ingestion-flow and retrieval/provenance-flow diagrams, plus the
 reasoning behind each architectural choice, live in
 [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md).
 Individual decisions are recorded as ADRs in [`docs/adr/`](docs/adr/)
-(15 so far, one per significant decision).
+(16 so far, one per significant decision).
 
 ## Quickstart
 
@@ -283,7 +304,7 @@ supported format.
 ```bash
 cd apps/api
 pip install -r requirements-dev.txt
-pytest -q      # 144 passed, 3 skipped
+pytest -q      # 161 passed, 3 skipped
 ruff check app tests
 black --check app tests
 ```
@@ -310,28 +331,29 @@ knowledgehub-ai/
 │   │   │   ├── api/v1/routes/auth.py            # M2 -- live
 │   │   │   ├── api/v1/routes/workspace.py       # M2 -- live
 │   │   │   ├── api/v1/routes/documents.py       # M3/M5 -- live
-│   │   │   ├── api/v1/routes/chat.py            # M8 -- live
+│   │   │   ├── api/v1/routes/chat.py            # M8/M9 -- live
 │   │   │   ├── services/storage.py, extraction.py,
 │   │   │   │   chunking.py, ingestion_service.py    # M3/M5 -- live
 │   │   │   ├── services/embeddings.py, vector_repo.py  # M3/M8 -- live
 │   │   │   ├── services/classification.py       # M6 -- live
 │   │   │   ├── services/concept_linking.py, concept_graph.py  # M7 -- live
 │   │   │   ├── services/llm.py, retrieval_service.py,
-│   │   │   │   sufficiency.py                    # M8 -- live
+│   │   │   │   sufficiency.py                    # M8/M9 -- live
+│   │   │   ├── services/intents/                 # M9 -- live (plugin registry)
 │   │   │   ├── core/, db/, models/, schemas/
 │   │   │   └── main.py
-│   │   ├── alembic/versions/                     # M4-M8 migrations
+│   │   ├── alembic/versions/                     # M4-M9 migrations
 │   │   └── tests/
 │   └── web/
 │       ├── app/
 │       │   ├── page.tsx, layout.tsx              # M1 -- live
 │       │   ├── login/, register/, workspace/, settings/  # M2
-│       │   ├── documents/                        # M3/M5/M6 -- live
-│       │   ├── concepts/                         # M7 -- live
-│       │   └── chat/                             # M8 -- live
+│       │   ├── documents/                        # M3/M5/M6/M9 -- live
+│       │   ├── concepts/                         # M7/M9 -- live
+│       │   └── chat/                             # M8/M9 -- live
 │       ├── components/, lib/
 ├── docs/
-│   ├── adr/                # architecture decision records, 0001-0015
+│   ├── adr/                # architecture decision records, 0001-0016
 │   ├── milestones/          # per-milestone design/implementation/verification
 │   ├── architecture/        # system architecture + diagrams
 │   └── assets/screenshots/  # README screenshots (see its own README)
@@ -355,8 +377,8 @@ knowledgehub-ai/
 | 5 | Multi-Format Ingestion | DOCX, PPTX, TXT/MD, code, YouTube, image OCR | Frozen (`v0.5.0-multi-format-ingestion`) |
 | 6 | Metadata, Classification & Confidence | Auto-classification with confidence + correction UI | Frozen (`v0.6.0-metadata-classification`) |
 | 7 | Concept Graph | Concepts, relationships, incremental linking, browse UI | Frozen (`v0.7.0-concept-graph`) |
-| 8 | Local-First Retrieval & Provenance | Hybrid retrieval, sufficiency scorer, provenance, consent-gated fallback | **Frozen -- current** (`v0.8.0-local-first-retrieval`) |
-| 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | Not started |
+| 8 | Local-First Retrieval & Provenance | Hybrid retrieval, sufficiency scorer, provenance, consent-gated fallback | Frozen (`v0.8.0-local-first-retrieval`) |
+| 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | **Frozen -- current** (`v0.9.0-intent-workflows`) |
 | 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | Not started |
 | 11 | Confidence & Correction UX | Dedicated UI for OCR/classification/retrieval confidence | Not started |
 | 12 | Production Hardening & Portfolio Polish | Queue re-evaluation, embedding migrations, seed data, docs, demo | Not started |
