@@ -5,6 +5,81 @@ frozen milestone. Each entry links to that milestone's full design/
 implementation/verification record under `docs/milestones/`; this file is
 a summary index, not a replacement for those documents.
 
+## [v0.11.0] -- Confidence & Correction UX
+
+See `docs/milestones/MILESTONE_11.md` for the full implementation and
+verification record, and `docs/adr/0018-confidence-correction-ux.md` for
+the design decisions summarized below.
+
+### Added
+- `resource_corrections` table (migration `0009_confidence_correction_ux.py`,
+  `app/models/correction.py`: `ResourceCorrection`, `CorrectionField`
+  enum) -- logs one row per classification field (`CONTENT_CATEGORY` /
+  `SUBJECT`) changed via `PATCH /documents/{id}/classification`,
+  capturing the prior value and confidence immediately before they're
+  overwritten.
+- `GET /documents/{id}/corrections` -- new, read-only, workspace-scoped
+  route returning a document's correction history, newest first.
+- `POST /documents/{id}/reextract` -- new, additive route that re-runs
+  the identical ingestion pipeline on an already-`READY` document whose
+  extraction confidence is low (409 `DOCUMENT_NOT_READY` otherwise).
+  `POST /documents/{id}/retry` and its route are completely unchanged.
+- `DocumentOut` gained four optional fields --
+  `autoContentCategory`/`autoContentCategoryConfidence`/`autoSubject`/
+  `autoSubjectConfidence` -- exposing `Resource.auto_*` (written on every
+  classification run since Milestone 6, never returned by the API
+  before now).
+- `AnswerOut` and `IntentResponse` each gained one optional field,
+  `sufficiencyReason` -- exposing `Answer.sufficiency_reason` (computed
+  by the unchanged sufficiency scorer since Milestone 8). Populated for
+  the `/messages` (Explain) chat path; not yet populated by any of the
+  nine `IntentHandler`s, since none was modified this milestone.
+- `LOW_CONFIDENCE_THRESHOLD` config setting (`0.5`), shared by extraction
+  and classification triage; mirrored client-side in `lib/api.ts` since
+  there is no config-exposing endpoint.
+- Frontend: a correction-history list, a reclassification-suggestion
+  banner ("Use this" / "Keep mine", client-only dismissal), a
+  `subjectConfidence`/`subjectConfirmed` display fix, and a "Re-run
+  extraction" button, all on the document detail page; a "Needs review"
+  filter, a lowest-confidence sort, and a per-row confidence indicator
+  on the document library page (built entirely on already-returned
+  `DocumentOut` fields, no new route); the previously-dropped
+  `sufficiencyScore` now rendered in chat, plus a "Why?" affordance
+  mapping `sufficiencyReason`'s five fixed codes to plain-language
+  sentences.
+- 18 new backend tests in `tests/test_confidence_correction_ux.py`:
+  correction-row insertion (single field, both fields, pre-overwrite
+  value/confidence capture), correction-history read (newest-first,
+  auth, 404, workspace isolation), `auto_*` field exposure surviving a
+  later reclassification, `reextract` success/rejection cases, and
+  `sufficiencyReason` presence on both `AnswerOut` and `IntentResponse`.
+
+### Changed
+- `PATCH /documents/{id}/classification` -- request/response shape and
+  externally-visible behavior unchanged; now additionally inserts a
+  `resource_corrections` row per changed field.
+- `tests/test_alembic_migrations.py` -- `EXPECTED_TABLES` extended with
+  `resource_corrections`.
+
+### Testing
+- Full suite: 207 passed, 0 failed, 3 skipped (skips are the
+  Tesseract-OCR-dependent tests, unchanged from Milestone 10, skipped
+  only when the `tesseract` binary isn't on `PATH`).
+- Full regression of every existing `/retry` test: unchanged behavior
+  confirmed (`retry_document` has zero lines changed).
+- Ruff and Black clean on every new/changed file; `tsc --noEmit` clean.
+
+### Documentation
+- `docs/milestones/MILESTONE_11.md` updated to "Implemented and
+  Verified" with the full verification record and a pre-freeze
+  implementation review (four minor documentation/cleanup fixes found
+  and applied; zero functional or scope issues).
+- `docs/adr/0018-confidence-correction-ux.md` added, covering why
+  `resource_corrections` is a separate, persisted table; why
+  `reextract` is a new route rather than a change to `retry`; why
+  confidence metadata is exposed additively; and why chat-answer
+  feedback was intentionally left out of scope.
+
 ## [v0.10.0] -- Study Workflows
 
 See `docs/milestones/MILESTONE_10.md` for the full implementation and

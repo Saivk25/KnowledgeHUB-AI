@@ -8,16 +8,17 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](apps/api/requirements.txt)
 [![Next.js](https://img.shields.io/badge/frontend-Next.js-black.svg)](apps/web/package.json)
 
-> **Status: Milestone 10 of 12 -- Study Workflows -- frozen and tagged
-> `v0.10.0`.** Milestones 1-10 are implemented, verified, and frozen.
-> This README has two parts: **Part 1** describes the finished product
-> this project is building toward; **Part 2** describes exactly what
-> exists in this repository right now.
+> **Status: Milestone 11 of 12 -- Confidence & Correction UX -- implemented
+> and verified (commit `12e93c0`), to be tagged `v0.11.0`.** Milestones
+> 1-11 are implemented, verified, and frozen. This README has two parts:
+> **Part 1** describes the finished product this project is building
+> toward; **Part 2** describes exactly what exists in this repository
+> right now.
 
 ## Contents
 
 - [Part 1 -- The Vision](#part-1----the-vision-what-this-becomes-when-complete)
-- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-10)
+- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-11)
 - [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
@@ -106,7 +107,7 @@ document this repository is built against.
 
 ---
 
-## Part 2 -- What's Actually Built So Far (Through Milestone 10)
+## Part 2 -- What's Actually Built So Far (Through Milestone 11)
 
 Everything below is real, implemented, tested, and frozen -- not a plan.
 
@@ -173,7 +174,7 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
     Full record in
     [`docs/milestones/MILESTONE_9.md`](docs/milestones/MILESTONE_9.md)
     and [`docs/adr/0016-intent-workflows.md`](docs/adr/0016-intent-workflows.md).
-- **M10 -- Study Workflows** (`v0.10.0`, current): the remaining five FR-8
+- **M10 -- Study Workflows** (`v0.10.0`): the remaining five FR-8
   intents, completing the nine-intent set M9 started.
   - **Quiz me** and **Viva mode** are the first genuinely multi-turn
     intents in the codebase -- a generation/start turn and a later
@@ -204,6 +205,39 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
     and frontend build (all 14 routes) both green. Full record in
     [`docs/milestones/MILESTONE_10.md`](docs/milestones/MILESTONE_10.md)
     and [`docs/adr/0017-study-workflows.md`](docs/adr/0017-study-workflows.md).
+- **M11 -- Confidence & Correction UX** (`v0.11.0`, current): surfaces
+  confidence/correction signals that already existed in the data model
+  but never reached the API or UI -- no new confidence computation
+  anywhere.
+  - **Correction history**: a new `resource_corrections` table
+    (migration `0009_confidence_correction_ux`) logs one row per
+    classification field changed via the existing `PATCH
+    /documents/{id}/classification` route, capturing the prior value and
+    confidence immediately before it's overwritten. A new read-only
+    route, `GET /documents/{id}/corrections`, exposes the log newest
+    first on the document detail page.
+  - **`auto_*` reclassification fields** (`Resource.auto_content_category`/
+    `auto_subject` and their confidences, tracked since Milestone 6 but
+    never returned by the API) are now exposed on `DocumentOut`, driving
+    a reclassification-suggestion banner ("Use this" / "Keep mine") when
+    the latest automatic run disagrees with the confirmed value.
+  - **Document re-extraction**: a new, additive `POST
+    /documents/{id}/reextract` route re-runs ingestion on an
+    already-`READY` document with low extraction confidence, without
+    changing the existing `FAILED`-only `POST /documents/{id}/retry`
+    route at all.
+  - **Confidence surfaced in the document library**: a "Needs review"
+    filter, a lowest-confidence sort, and a per-row indicator, built
+    entirely client-side on fields the API already returned.
+  - **Chat**: the previously-computed-but-never-rendered
+    `sufficiencyScore` is now shown alongside the provenance badge, and a
+    new `sufficiencyReason` field (exposing the sufficiency scorer's five
+    fixed reason codes) powers a "Why?" affordance.
+  - Verified: 207 tests passing, 0 failing, 3 skipped (18 new tests in
+    `test_confidence_correction_ux.py`); Ruff and Black clean on every
+    file this milestone touched; `tsc --noEmit` clean. Full record in
+    [`docs/milestones/MILESTONE_11.md`](docs/milestones/MILESTONE_11.md)
+    and [`docs/adr/0018-confidence-correction-ux.md`](docs/adr/0018-confidence-correction-ux.md).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the itemized Added/Changed/Fixed
 list behind every tag above.
@@ -231,11 +265,17 @@ list behind every tag above.
 - Check a workspace-wide Revision list ranked by what actually needs your
   attention, and build a Study planner schedule across 2+ documents or
   concepts, phrased into a day-by-day plan.
+- Filter your document library to "Needs review" or sort it by lowest
+  confidence, see a document's full classification-correction history,
+  accept or dismiss a reclassification suggestion when the automatic
+  classifier's latest opinion differs from your confirmed answer, and
+  re-run extraction on a low-confidence document without waiting for it
+  to fail first.
+- See a chat answer's sufficiency score and expand "Why?" for a
+  plain-language explanation of the sufficiency scorer's verdict.
 
 ### What's deliberately not built yet
 
-- No dedicated confidence/correction UI surfaces beyond what M6 already
-  exposes for classification (M11).
 - No production hardening pass -- queue-vs-BackgroundTask re-evaluation
   under real load, embedding-version migration tooling, full seed data,
   demo script (M12).
@@ -288,7 +328,7 @@ Full ingestion-flow and retrieval/provenance-flow diagrams, plus the
 reasoning behind each architectural choice, live in
 [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md).
 Individual decisions are recorded as ADRs in [`docs/adr/`](docs/adr/)
-(17 so far, one per significant decision).
+(18 so far, one per significant decision).
 
 ## Quickstart
 
@@ -340,7 +380,7 @@ supported format.
 ```bash
 cd apps/api
 pip install -r requirements-dev.txt
-pytest -q      # 189 passed, 3 skipped
+pytest -q      # 207 passed, 3 skipped
 ruff check app tests
 black --check app tests
 ```
@@ -366,8 +406,8 @@ knowledgehub-ai/
 │   │   │   ├── api/routes/health.py             # M1 -- live
 │   │   │   ├── api/v1/routes/auth.py            # M2 -- live
 │   │   │   ├── api/v1/routes/workspace.py       # M2 -- live
-│   │   │   ├── api/v1/routes/documents.py       # M3/M5 -- live
-│   │   │   ├── api/v1/routes/chat.py            # M8/M9/M10 -- live
+│   │   │   ├── api/v1/routes/documents.py       # M3/M5/M6/M11 -- live
+│   │   │   ├── api/v1/routes/chat.py            # M8/M9/M10/M11 -- live
 │   │   │   ├── services/storage.py, extraction.py,
 │   │   │   │   chunking.py, ingestion_service.py    # M3/M5 -- live
 │   │   │   ├── services/embeddings.py, vector_repo.py  # M3/M8 -- live
@@ -379,23 +419,24 @@ knowledgehub-ai/
 │   │   │   │   explain/search/summarize/compare + quiz/flashcards/viva/revision/study_planner)
 │   │   │   ├── services/study_signals.py         # M10 -- live (shared by Revision + Study planner)
 │   │   │   ├── models/study.py                   # M10 -- live (QuizAttempt, VivaSession)
+│   │   │   ├── models/correction.py              # M11 -- live (ResourceCorrection, CorrectionField)
 │   │   │   ├── core/, db/, models/, schemas/
 │   │   │   └── main.py
-│   │   ├── alembic/versions/                     # M4-M10 migrations
+│   │   ├── alembic/versions/                     # M4-M11 migrations
 │   │   └── tests/
 │   └── web/
 │       ├── app/
 │       │   ├── page.tsx, layout.tsx              # M1 -- live
 │       │   ├── login/, register/, workspace/, settings/  # M2
-│       │   ├── documents/                        # M3/M5/M6/M9/M10 -- live
+│       │   ├── documents/                        # M3/M5/M6/M9/M10/M11 -- live
 │       │   ├── concepts/                         # M7/M9/M10 -- live
-│       │   ├── chat/                             # M8/M9 -- live
+│       │   ├── chat/                             # M8/M9/M11 -- live
 │       │   ├── revision/                         # M10 -- live
 │       │   └── study-plan/                       # M10 -- live
 │       ├── components/StudyPanels.tsx            # M10 -- live (Quiz/Flashcards/Viva panels)
 │       ├── components/, lib/
 ├── docs/
-│   ├── adr/                # architecture decision records, 0001-0017
+│   ├── adr/                # architecture decision records, 0001-0018
 │   ├── milestones/          # per-milestone design/implementation/verification
 │   ├── architecture/        # system architecture + diagrams
 │   └── assets/screenshots/  # README screenshots (see its own README)
@@ -421,8 +462,8 @@ knowledgehub-ai/
 | 7 | Concept Graph | Concepts, relationships, incremental linking, browse UI | Frozen (`v0.7.0-concept-graph`) |
 | 8 | Local-First Retrieval & Provenance | Hybrid retrieval, sufficiency scorer, provenance, consent-gated fallback | Frozen (`v0.8.0-local-first-retrieval`) |
 | 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | Frozen (`v0.9.0-intent-workflows`) |
-| 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | **Frozen -- current** (`v0.10.0`) |
-| 11 | Confidence & Correction UX | Dedicated UI for OCR/classification/retrieval confidence | Not started |
+| 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | Frozen (`v0.10.0`) |
+| 11 | Confidence & Correction UX | Correction history, document re-extraction, confidence metadata surfaced in the UI | **Frozen -- current** (`v0.11.0`) |
 | 12 | Production Hardening & Portfolio Polish | Queue re-evaluation, embedding migrations, seed data, docs, demo | Not started |
 
 Detailed architecture decisions for the whole system live in
