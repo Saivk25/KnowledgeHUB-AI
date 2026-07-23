@@ -8,16 +8,16 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](apps/api/requirements.txt)
 [![Next.js](https://img.shields.io/badge/frontend-Next.js-black.svg)](apps/web/package.json)
 
-> **Status: Milestone 9 of 12 -- Intent Workflows -- frozen and tagged
-> `v0.9.0-intent-workflows`.** Milestones 1-9 are implemented, verified,
-> and frozen. This README has two parts: **Part 1** describes the
-> finished product this project is building toward; **Part 2** describes
-> exactly what exists in this repository right now.
+> **Status: Milestone 10 of 12 -- Study Workflows -- frozen and tagged
+> `v0.10.0`.** Milestones 1-10 are implemented, verified, and frozen.
+> This README has two parts: **Part 1** describes the finished product
+> this project is building toward; **Part 2** describes exactly what
+> exists in this repository right now.
 
 ## Contents
 
 - [Part 1 -- The Vision](#part-1----the-vision-what-this-becomes-when-complete)
-- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-9)
+- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-10)
 - [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
@@ -106,7 +106,7 @@ document this repository is built against.
 
 ---
 
-## Part 2 -- What's Actually Built So Far (Through Milestone 9)
+## Part 2 -- What's Actually Built So Far (Through Milestone 10)
 
 Everything below is real, implemented, tested, and frozen -- not a plan.
 
@@ -147,7 +147,7 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
   - Chat reactivated end-to-end: `/api/v1/conversations` mounted, and
     `apps/web/app/chat/` live with a provenance badge, retrieval
     confidence, and an explicit external-fallback confirmation control.
-- **M9 -- Intent Workflows** (`v0.9.0-intent-workflows`, current):
+- **M9 -- Intent Workflows** (`v0.9.0-intent-workflows`):
   - Four distinct intents -- Explain, Search, Summarize, Compare -- each
     its own `IntentHandler` in a plugin registry
     (`app/services/intents/`), not a branching dispatcher, sharing common
@@ -173,6 +173,37 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
     Full record in
     [`docs/milestones/MILESTONE_9.md`](docs/milestones/MILESTONE_9.md)
     and [`docs/adr/0016-intent-workflows.md`](docs/adr/0016-intent-workflows.md).
+- **M10 -- Study Workflows** (`v0.10.0`, current): the remaining five FR-8
+  intents, completing the nine-intent set M9 started.
+  - **Quiz me** and **Viva mode** are the first genuinely multi-turn
+    intents in the codebase -- a generation/start turn and a later
+    grading/continuation turn, with a private answer key or grading
+    rubric held server-side in two new tables (`quiz_attempts`,
+    `viva_sessions`) and never echoed back to the client until the
+    matching turn reveals it. Quiz is multiple-choice only, so grading is
+    exact-match with zero additional LLM calls.
+  - **Flashcards** reuses Summarize's exact resource/concept/freeform
+    three-mode resolution, generating cited front/back pairs instead of
+    prose.
+  - **Revision mode** ranks concepts/resources by how much they need
+    review (never reviewed, low quiz score, thin evidence), reading only
+    this milestone's own `QuizAttempt`/`VivaSession` history and the
+    existing concept graph -- it never touches or retrofits Milestone
+    9's frozen intents.
+  - **Study planner** spreads 2+ targets across a schedule that is always
+    computed deterministically (day/target assignment is never
+    LLM-decided); a single batched `LLMProvider.narrate_study_plan()`
+    call phrases the already-decided schedule.
+  - A new shared helper, `app/services/study_signals.py`'s
+    `assess_review_need()`, is called by both Revision mode and Study
+    planner rather than duplicating "what needs review" logic.
+  - Frontend: Quiz/Flashcards/Viva panels on document and concept detail
+    pages, and two new pages -- `/revision` and `/study-plan`.
+  - Verified: 189 tests passing, 0 failing, 3 skipped; Ruff and Black
+    clean on every file this milestone touched; Docker Compose smoke test
+    and frontend build (all 14 routes) both green. Full record in
+    [`docs/milestones/MILESTONE_10.md`](docs/milestones/MILESTONE_10.md)
+    and [`docs/adr/0017-study-workflows.md`](docs/adr/0017-study-workflows.md).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the itemized Added/Changed/Fixed
 list behind every tag above.
@@ -193,11 +224,16 @@ list behind every tag above.
 - Switch chat between Explain and Search modes, get a one-click Summarize
   of any document or concept, and multi-select 2-4 concepts to Compare --
   each with the same provenance and citation honesty as Explain.
+- Quiz yourself on any document or concept (multiple-choice, generated
+  then graded against a server-side answer key), generate cited
+  Flashcards, or work through a multi-turn Viva mode that grades each
+  answer and asks a follow-up question grounded in the same evidence.
+- Check a workspace-wide Revision list ranked by what actually needs your
+  attention, and build a Study planner schedule across 2+ documents or
+  concepts, phrased into a day-by-day plan.
 
 ### What's deliberately not built yet
 
-- No study workflows -- quiz mode, flashcards, spaced repetition, a study
-  planner (M10).
 - No dedicated confidence/correction UI surfaces beyond what M6 already
   exposes for classification (M11).
 - No production hardening pass -- queue-vs-BackgroundTask re-evaluation
@@ -252,7 +288,7 @@ Full ingestion-flow and retrieval/provenance-flow diagrams, plus the
 reasoning behind each architectural choice, live in
 [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md).
 Individual decisions are recorded as ADRs in [`docs/adr/`](docs/adr/)
-(16 so far, one per significant decision).
+(17 so far, one per significant decision).
 
 ## Quickstart
 
@@ -304,7 +340,7 @@ supported format.
 ```bash
 cd apps/api
 pip install -r requirements-dev.txt
-pytest -q      # 161 passed, 3 skipped
+pytest -q      # 189 passed, 3 skipped
 ruff check app tests
 black --check app tests
 ```
@@ -331,29 +367,35 @@ knowledgehub-ai/
 │   │   │   ├── api/v1/routes/auth.py            # M2 -- live
 │   │   │   ├── api/v1/routes/workspace.py       # M2 -- live
 │   │   │   ├── api/v1/routes/documents.py       # M3/M5 -- live
-│   │   │   ├── api/v1/routes/chat.py            # M8/M9 -- live
+│   │   │   ├── api/v1/routes/chat.py            # M8/M9/M10 -- live
 │   │   │   ├── services/storage.py, extraction.py,
 │   │   │   │   chunking.py, ingestion_service.py    # M3/M5 -- live
 │   │   │   ├── services/embeddings.py, vector_repo.py  # M3/M8 -- live
 │   │   │   ├── services/classification.py       # M6 -- live
 │   │   │   ├── services/concept_linking.py, concept_graph.py  # M7 -- live
 │   │   │   ├── services/llm.py, retrieval_service.py,
-│   │   │   │   sufficiency.py                    # M8/M9 -- live
-│   │   │   ├── services/intents/                 # M9 -- live (plugin registry)
+│   │   │   │   sufficiency.py                    # M8/M9/M10 -- live
+│   │   │   ├── services/intents/                 # M9/M10 -- live (plugin registry:
+│   │   │   │   explain/search/summarize/compare + quiz/flashcards/viva/revision/study_planner)
+│   │   │   ├── services/study_signals.py         # M10 -- live (shared by Revision + Study planner)
+│   │   │   ├── models/study.py                   # M10 -- live (QuizAttempt, VivaSession)
 │   │   │   ├── core/, db/, models/, schemas/
 │   │   │   └── main.py
-│   │   ├── alembic/versions/                     # M4-M9 migrations
+│   │   ├── alembic/versions/                     # M4-M10 migrations
 │   │   └── tests/
 │   └── web/
 │       ├── app/
 │       │   ├── page.tsx, layout.tsx              # M1 -- live
 │       │   ├── login/, register/, workspace/, settings/  # M2
-│       │   ├── documents/                        # M3/M5/M6/M9 -- live
-│       │   ├── concepts/                         # M7/M9 -- live
-│       │   └── chat/                             # M8/M9 -- live
+│       │   ├── documents/                        # M3/M5/M6/M9/M10 -- live
+│       │   ├── concepts/                         # M7/M9/M10 -- live
+│       │   ├── chat/                             # M8/M9 -- live
+│       │   ├── revision/                         # M10 -- live
+│       │   └── study-plan/                       # M10 -- live
+│       ├── components/StudyPanels.tsx            # M10 -- live (Quiz/Flashcards/Viva panels)
 │       ├── components/, lib/
 ├── docs/
-│   ├── adr/                # architecture decision records, 0001-0016
+│   ├── adr/                # architecture decision records, 0001-0017
 │   ├── milestones/          # per-milestone design/implementation/verification
 │   ├── architecture/        # system architecture + diagrams
 │   └── assets/screenshots/  # README screenshots (see its own README)
@@ -378,8 +420,8 @@ knowledgehub-ai/
 | 6 | Metadata, Classification & Confidence | Auto-classification with confidence + correction UI | Frozen (`v0.6.0-metadata-classification`) |
 | 7 | Concept Graph | Concepts, relationships, incremental linking, browse UI | Frozen (`v0.7.0-concept-graph`) |
 | 8 | Local-First Retrieval & Provenance | Hybrid retrieval, sufficiency scorer, provenance, consent-gated fallback | Frozen (`v0.8.0-local-first-retrieval`) |
-| 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | **Frozen -- current** (`v0.9.0-intent-workflows`) |
-| 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | Not started |
+| 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | Frozen (`v0.9.0-intent-workflows`) |
+| 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | **Frozen -- current** (`v0.10.0`) |
 | 11 | Confidence & Correction UX | Dedicated UI for OCR/classification/retrieval confidence | Not started |
 | 12 | Production Hardening & Portfolio Polish | Queue re-evaluation, embedding migrations, seed data, docs, demo | Not started |
 

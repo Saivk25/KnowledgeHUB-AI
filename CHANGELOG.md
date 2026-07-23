@@ -5,6 +5,69 @@ frozen milestone. Each entry links to that milestone's full design/
 implementation/verification record under `docs/milestones/`; this file is
 a summary index, not a replacement for those documents.
 
+## [v0.10.0] -- Study Workflows
+
+See `docs/milestones/MILESTONE_10.md` for the full implementation and
+verification record.
+
+### Added
+- Five new `IntentHandler`s completing the nine-intent FR-8 set:
+  `QuizIntent`, `FlashcardsIntent`, `VivaIntent`, `RevisionIntent`,
+  `StudyPlannerIntent` (`app/services/intents/`), registered in the same
+  plugin registry alongside Milestone 9's four.
+- Two new tables (migration `0008_study_workflows.py`,
+  `app/models/study.py`): `QuizAttempt` (server-side-only generated
+  answer key) and `VivaSession` (server-side-only turn-by-turn grading
+  rubric and transcript) -- the first genuinely multi-turn intents in
+  this codebase, needing private state that survives between a
+  generation/start turn and a later grading/continuation turn without
+  ever being echoed back to the client in between.
+- Quiz me: multiple-choice only, generated then graded by exact-match
+  against the stored `correctChoice` index -- zero additional LLM calls
+  to grade.
+- Flashcards: the same resource/concept/freeform three-mode resolution
+  Summarize already established, generating cited front/back pairs.
+- Viva mode: an adaptive, N-turn oral-exam-style flow -- each turn grades
+  the previous answer against its private rubric and asks a new question
+  grounded in the same evidence, completing at `VIVA_MAX_TURNS`.
+- Revision mode: ranks concepts/resources by review urgency (never
+  reviewed / low quiz score / thin evidence), reading only this
+  milestone's own `QuizAttempt`/`VivaSession` history and the existing
+  concept graph.
+- Study planner: spreads 2+ targets across a schedule that is always
+  computed deterministically in Python (day/target assignment is never
+  LLM-decided); a single batched `LLMProvider.narrate_study_plan()` call
+  phrases the already-decided schedule.
+- New shared helper `app/services/study_signals.py`'s
+  `assess_review_need()`, called by both Revision mode and Study planner
+  rather than duplicating "what needs review" logic.
+- `LLMProvider` gained four new methods -- `generate_quiz`,
+  `generate_flashcards`, `conduct_viva_turn`, `narrate_study_plan` -- on
+  both `OpenAIChatProvider` (one retry on malformed JSON) and
+  `ExtractiveFallbackProvider` (cloze-deletion quiz, sentence-based
+  flashcards, keyword-overlap viva grading, pass-through narration).
+- `IntentRequest`/`IntentResult` extended additively: `IntentType` gains
+  `QUIZ`/`FLASHCARDS`/`VIVA`/`REVISION`/`STUDY_PLAN`; new optional
+  request fields (`questionCount`, `quizId`, `quizAnswers`, `sessionId`,
+  `vivaAnswer`, `targetDate`, `horizonDays`); `IntentResult`'s
+  discriminated union grows from four members to nine. Every Milestone 9
+  field's meaning is unchanged.
+- Frontend: `components/StudyPanels.tsx` (`QuizPanel`/`FlashcardsPanel`/
+  `VivaPanel`), embedded on both the document and concept detail pages;
+  two new pages, `/revision` and `/study-plan`.
+
+### Changed
+- `api/v1/routes/chat.py`'s transcript-rendering helpers
+  (`_describe_intent_request`, `_extract_assistant_content`) gained five
+  new branches, one per new intent -- the only touch to a Milestone 9
+  file this milestone made, and purely cosmetic transcript text; no
+  routing, persistence, or dispatch logic changed.
+
+See `docs/adr/0017-study-workflows.md` for the full design, including all
+five approved decisions (statefulness via two new tables, MCQ-only quiz,
+Revision mode's data sources, Study planner's deterministic-scheduling-
+plus-LLM-narration split, and the scoped exception to touch `chat.py`).
+
 ## [v0.9.0-intent-workflows] -- Intent Workflows
 
 See `docs/milestones/MILESTONE_9.md` for the full implementation and
