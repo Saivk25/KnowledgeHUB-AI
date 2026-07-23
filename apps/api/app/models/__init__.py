@@ -9,6 +9,7 @@ from app.models.concept import (
     ResourceConcept,
 )
 from app.models.conversation import Conversation, Message
+from app.models.correction import CorrectionField, ResourceCorrection
 from app.models.ingestion_job import IngestionJob, IngestionStep
 from app.models.resource import (
     Resource,
@@ -47,4 +48,6 @@ __all__ = [
     "QuizAttemptStatus",
     "VivaSession",
     "VivaSessionStatus",
+    "ResourceCorrection",
+    "CorrectionField",
 ]

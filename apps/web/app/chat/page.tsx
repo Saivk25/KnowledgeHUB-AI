@@ -5,7 +5,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import CitationPill from "@/components/CitationPill";
 import SourceViewerModal from "@/components/SourceViewerModal";
-import { api, ApiError, CitationOut, Provenance, SearchResultOut } from "@/lib/api";
+import { api, ApiError, CitationOut, Provenance, SearchResultOut, SUFFICIENCY_REASON_LABELS } from "@/lib/api";
 
 interface ChatMessage {
   id: string;
@@ -19,6 +19,14 @@ interface ChatMessage {
   // The question this assistant message answered -- kept so the external
   // fallback confirmation button below can resend it with consent.
   sourceQuestion?: string;
+  // Milestone 11 (Confidence & Correction UX): sufficiencyScore was
+  // already returned by both AnswerOut and IntentResponse since
+  // Milestone 8, but this component never copied it into ChatMessage
+  // state -- a pure "expose an already-returned field" fix, not a
+  // backend change. sufficiencyReason is a genuinely new schema field
+  // this milestone adds, powering the "Why?" affordance below.
+  sufficiencyScore?: number;
+  sufficiencyReason?: string | null;
 }
 
 const SUGGESTIONS = [
@@ -70,6 +78,9 @@ export default function ChatPage() {
   const [phase, setPhase] = useState<"idle" | "searching" | "generating">("idle");
   const [error, setError] = useState<string | null>(null);
   const [activeCitation, setActiveCitation] = useState<CitationOut | null>(null);
+  // Milestone 11: which assistant message currently has its "Why?"
+  // sufficiency-reason explanation expanded (at most one at a time).
+  const [whyOpenId, setWhyOpenId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -119,6 +130,8 @@ export default function ChatPage() {
             canOfferExternalFallback: false,
             citations: searchResult.hits,
             sourceQuestion: content,
+            sufficiencyScore: res.sufficiencyScore,
+            sufficiencyReason: res.sufficiencyReason,
           },
         ]);
       } else {
@@ -135,6 +148,8 @@ export default function ChatPage() {
             canOfferExternalFallback: res.answer.canOfferExternalFallback,
             citations: res.answer.citations,
             sourceQuestion: content,
+            sufficiencyScore: res.answer.sufficiencyScore,
+            sufficiencyReason: res.answer.sufficiencyReason,
           },
         ]);
       }
@@ -190,9 +205,31 @@ export default function ChatPage() {
                     }`}
                   >
                     {m.role === "assistant" && m.provenance && (
-                      <div className="mb-2">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
                         <ProvenanceBadge provenance={m.provenance} confidence={m.retrievalConfidence} />
+                        {/* Milestone 11 (4.3): sufficiencyScore was already
+                            returned by the API but dropped here -- now
+                            rendered, plus a "Why?" affordance mapping the
+                            newly-exposed sufficiencyReason to a sentence. */}
+                        {typeof m.sufficiencyScore === "number" && (
+                          <span className="text-[11px] text-slate-400">
+                            sufficiency {Math.round(m.sufficiencyScore * 100)}%
+                          </span>
+                        )}
+                        {m.sufficiencyReason && (
+                          <button
+                            onClick={() => setWhyOpenId(whyOpenId === m.id ? null : m.id)}
+                            className="text-[11px] font-medium text-indigo hover:underline"
+                          >
+                            Why?
+                          </button>
+                        )}
                       </div>
+                    )}
+                    {whyOpenId === m.id && m.sufficiencyReason && (
+                      <p className="mb-2 rounded-md bg-canvas px-2.5 py-1.5 text-xs text-slate-500">
+                        {SUFFICIENCY_REASON_LABELS[m.sufficiencyReason] ?? m.sufficiencyReason}
+                      </p>
                     )}
                     <p className="whitespace-pre-wrap">{m.content}</p>
                     {m.citations && m.citations.length > 0 && (

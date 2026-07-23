@@ -27,6 +27,16 @@ class DocumentOut(BaseModel):
     subject: str | None = None
     subjectConfidence: float | None = None
     subjectConfirmed: bool = False
+    # Milestone 11 (Confidence & Correction UX): the most recent automatic
+    # classification run, regardless of whether content_category/subject
+    # have since been confirmed -- exposes Resource.auto_* (written on
+    # every classification run by ingestion_service.py's
+    # _apply_classification, previously never reaching the API at all).
+    # See docs/milestones/MILESTONE_11.md Section 4.2.
+    autoContentCategory: str | None = None
+    autoContentCategoryConfidence: float | None = None
+    autoSubject: str | None = None
+    autoSubjectConfidence: float | None = None
 
 
 class ClassificationUpdateRequest(BaseModel):
@@ -65,3 +75,19 @@ class DocumentDetailOut(BaseModel):
     document: DocumentOut
     processingJob: IngestionJobOut | None = None
     concepts: list[ConceptLinkOut] = []
+
+
+class CorrectionOut(BaseModel):
+    """Milestone 11: one row of a document's correction history. See
+    GET /documents/{id}/corrections and app/models/correction.py."""
+
+    id: str
+    field: str  # CONTENT_CATEGORY | SUBJECT
+    previousValue: str | None = None
+    previousConfidence: float | None = None
+    newValue: str
+    correctedAt: str
+
+
+class CorrectionListOut(BaseModel):
+    items: list[CorrectionOut]

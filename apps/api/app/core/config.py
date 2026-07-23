@@ -159,6 +159,13 @@ class Settings(BaseSettings):
     STUDY_PLANNER_DEFAULT_HORIZON_DAYS: int = 7
     STUDY_PLANNER_MAX_HORIZON_DAYS: int = 60
 
+    # -- Milestone 11 (Confidence & Correction UX) --
+    # Shared triage/badge threshold: below this, a document's extraction or
+    # classification confidence is flagged "needs review" in the document
+    # library and on the document detail page. See
+    # docs/milestones/MILESTONE_11.md Section 4.7 (Design Decision 1).
+    LOW_CONFIDENCE_THRESHOLD: float = 0.5
+
 
 @lru_cache
 def get_settings() -> Settings:

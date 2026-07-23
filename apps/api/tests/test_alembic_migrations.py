@@ -36,7 +36,7 @@ from alembic.config import Config
 _ALEMBIC_INI = os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini")
 
 # Tables a fresh `alembic upgrade head` is expected to create as of
-# Milestone 8.
+# Milestone 11.
 EXPECTED_TABLES = {
     "users",
     "workspaces",
@@ -58,6 +58,11 @@ EXPECTED_TABLES = {
     # Milestone 10 (Study Workflows, migration 0008_study_workflows):
     "quiz_attempts",
     "viva_sessions",
+    # Milestone 11 (Confidence & Correction UX, migration
+    # 0009_confidence_correction_ux): no `resources`/`answers` columns
+    # changed -- every field this milestone surfaces already existed --
+    # just one new correction-history table.
+    "resource_corrections",
     "alembic_version",
 }
 

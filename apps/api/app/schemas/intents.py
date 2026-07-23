@@ -261,3 +261,15 @@ class IntentResponse(BaseModel):
     canOfferExternalFallback: bool
     citations: list[CitationOut]
     result: IntentResult = Field(discriminator="kind")
+    # Milestone 11 (Confidence & Correction UX): mirrors AnswerOut's own
+    # addition (schemas/chat.py) -- one of the five fixed sufficiency
+    # reason codes from services/sufficiency.py. Every existing intent
+    # handler's IntentResponse(...) construction continues to work
+    # unchanged (Pydantic optional-field default), matching the same
+    # pattern Milestone 10 used adding its own optional envelope fields --
+    # no handler in app/services/intents/ is modified by this addition,
+    # so this field is always None for every intent today. It exists as
+    # additive, forward-compatible schema plumbing (the field a handler
+    # would populate if/when one starts resolving a real
+    # SufficiencyVerdict), not as something currently wired end to end.
+    sufficiencyReason: str | None = None

@@ -5,13 +5,39 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import CategoryBadge from "@/components/CategoryBadge";
 import StatusBadge from "@/components/StatusBadge";
-import { api, ApiError, DocumentOut } from "@/lib/api";
+import { api, ApiError, DocumentOut, LOW_CONFIDENCE_THRESHOLD } from "@/lib/api";
+
+// Milestone 11 (4.4): a document "needs review" when either its
+// extraction or its (unconfirmed) classification confidence is below the
+// shared threshold -- built entirely on fields DocumentOut already
+// returns (extractionConfidence, contentCategoryConfidence,
+// contentCategoryConfirmed), no new query parameter or route.
+function needsReview(doc: DocumentOut): boolean {
+  const lowExtraction = doc.extractionConfidence !== null && doc.extractionConfidence < LOW_CONFIDENCE_THRESHOLD;
+  const lowClassification =
+    !doc.contentCategoryConfirmed &&
+    doc.contentCategoryConfidence !== null &&
+    doc.contentCategoryConfidence < LOW_CONFIDENCE_THRESHOLD;
+  return lowExtraction || lowClassification;
+}
+
+// The lower of the two confidences this row has an opinion on, used for
+// the "lowest confidence first" sort and the per-row indicator below.
+// null (unknown) sorts as the lowest possible confidence.
+function lowestConfidence(doc: DocumentOut): number | null {
+  const values = [doc.extractionConfidence, doc.contentCategoryConfirmed ? null : doc.contentCategoryConfidence].filter(
+    (v): v is number => v !== null
+  );
+  return values.length > 0 ? Math.min(...values) : null;
+}
 
 export default function DocumentLibraryPage() {
   const [documents, setDocuments] = useState<DocumentOut[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
+  const [sortByConfidence, setSortByConfidence] = useState(false);
 
   const load = async () => {
     setError(null);
@@ -31,9 +57,25 @@ export default function DocumentLibraryPage() {
 
   const filtered = useMemo(() => {
     if (!documents) return null;
-    if (!query.trim()) return documents;
-    return documents.filter((d) => d.filename.toLowerCase().includes(query.toLowerCase()));
-  }, [documents, query]);
+    let items = documents;
+    if (query.trim()) {
+      items = items.filter((d) => d.filename.toLowerCase().includes(query.toLowerCase()));
+    }
+    if (needsReviewOnly) {
+      items = items.filter(needsReview);
+    }
+    if (sortByConfidence) {
+      items = [...items].sort((a, b) => {
+        const ca = lowestConfidence(a);
+        const cb = lowestConfidence(b);
+        if (ca === null && cb === null) return 0;
+        if (ca === null) return -1; // unknown confidence surfaces first, alongside genuinely low ones
+        if (cb === null) return 1;
+        return ca - cb;
+      });
+    }
+    return items;
+  }, [documents, query, needsReviewOnly, sortByConfidence]);
 
   const onDelete = async (id: string) => {
     if (!confirm("Delete this document? It will no longer be searchable.")) return;
@@ -61,12 +103,33 @@ export default function DocumentLibraryPage() {
           </Link>
         </div>
 
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by filename…"
-          className="mt-5 w-full max-w-sm rounded-lg border border-edge px-3 py-2 text-sm focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-        />
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by filename…"
+            className="w-full max-w-sm rounded-lg border border-edge px-3 py-2 text-sm focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+          />
+          {/* Milestone 11 (4.4): triage view -- client-side only, built on
+              extractionConfidence/contentCategoryConfidence/
+              contentCategoryConfirmed, all already fetched by listDocuments(). */}
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={needsReviewOnly}
+              onChange={(e) => setNeedsReviewOnly(e.target.checked)}
+            />
+            Needs review only
+          </label>
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={sortByConfidence}
+              onChange={(e) => setSortByConfidence(e.target.checked)}
+            />
+            Sort by lowest confidence
+          </label>
+        </div>
 
         {error && (
           <div className="mt-4 flex items-center justify-between rounded-lg border border-rose/30 bg-rose/10 px-4 py-3 text-sm text-rose-700">
@@ -110,6 +173,11 @@ export default function DocumentLibraryPage() {
                       <Link href={`/documents/${doc.id}`} className="font-medium text-ink hover:text-indigo">
                         {doc.filename}
                       </Link>
+                      {needsReview(doc) && (
+                        <span className="ml-2 rounded-full bg-amber/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                          Needs review
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <CategoryBadge category={doc.contentCategory} />

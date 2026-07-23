@@ -13,8 +13,10 @@
  * `uploadDocument`/`deleteDocument`/`retryDocument`/`fileUrl` (Milestone 3),
  * `listConcepts`/`getConceptDetail`/`getRelatedConcepts`/`mergeConcept`
  * (Milestone 7), `createConversation`/`getConversation`/`sendMessage`
- * (Milestone 8), and `sendIntent` -- now dispatching all nine FR-8
- * intents, Milestones 9-10 -- are all wired to live backend routers.
+ * (Milestone 8), `sendIntent` -- now dispatching all nine FR-8
+ * intents, Milestones 9-10 -- and `getCorrections`/`reextractDocument`
+ * (Milestone 11, Confidence & Correction UX) are all wired to live
+ * backend routers.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -130,6 +132,14 @@ export interface DocumentOut {
   subject: string | null;
   subjectConfidence: number | null;
   subjectConfirmed: boolean;
+  // Milestone 11 (Confidence & Correction UX): the most recent automatic
+  // classification run, regardless of whether content_category/subject
+  // have since been confirmed -- previously computed on every
+  // (re)classification but never returned by the API at all.
+  autoContentCategory: ContentCategory | null;
+  autoContentCategoryConfidence: number | null;
+  autoSubject: string | null;
+  autoSubjectConfidence: number | null;
 }
 export interface IngestionJobOut {
   step: string;
@@ -211,6 +221,10 @@ export interface AnswerOut {
   canOfferExternalFallback: boolean;
   content: string;
   citations: CitationOut[];
+  // Milestone 11: one of the five fixed sufficiency reason codes from
+  // services/sufficiency.py. Already computed/persisted since Milestone
+  // 8 -- this just exposes it. See SUFFICIENCY_REASON_LABELS below.
+  sufficiencyReason?: string | null;
 }
 export interface MessageOut {
   id: string;
@@ -380,6 +394,42 @@ export interface IntentResponse {
   canOfferExternalFallback: boolean;
   citations: CitationOut[];
   result: IntentResultOut;
+  // Milestone 11: mirrors AnswerOut's own addition above. Always
+  // undefined today -- no intent handler was modified to populate it
+  // (matching every existing handler's unchanged IntentResponse
+  // construction, a Pydantic optional-field default on the backend).
+  // Declared here as forward-compatible plumbing for when a handler
+  // starts resolving a real sufficiency verdict, not as something wired
+  // end to end yet.
+  sufficiencyReason?: string | null;
+}
+
+// -- Milestone 11: Confidence & Correction UX ----------------------------
+
+// Mirrors app/core/config.py's LOW_CONFIDENCE_THRESHOLD -- there is no
+// config-exposing endpoint, so this threshold is duplicated here, same
+// as every other client-side constant in this file that has no live
+// backend counterpart to read it from.
+export const LOW_CONFIDENCE_THRESHOLD = 0.5;
+
+// The five fixed reason codes services/sufficiency.py's compute_sufficiency()
+// can return (see AnswerOut.sufficiencyReason / IntentResponse.sufficiencyReason
+// above), mapped to a plain-language sentence for the chat "Why?" affordance.
+export const SUFFICIENCY_REASON_LABELS: Record<string, string> = {
+  no_candidates: "No matching content was found in your documents.",
+  strong_single_hit: "A single strongly matching passage was found.",
+  insufficient_supporting_hits: "A match was found, but not enough supporting evidence to be confident.",
+  below_min_score: "The best match found was too weak to be considered reliable evidence.",
+  top_score: "The best available match was used to answer this question.",
+};
+
+export interface CorrectionOut {
+  id: string;
+  field: "CONTENT_CATEGORY" | "SUBJECT";
+  previousValue: string | null;
+  previousConfidence: number | null;
+  newValue: string;
+  correctedAt: string;
 }
 
 export const api = {
@@ -417,6 +467,12 @@ export const api = {
   deleteDocument: (id: string) => request<void>(`/api/v1/documents/${id}`, { method: "DELETE" }),
   retryDocument: (id: string) => request<DocumentOut>(`/api/v1/documents/${id}/retry`, { method: "POST" }),
   fileUrl: (id: string) => `${API_URL}/api/v1/documents/${id}/file`,
+
+  // Milestone 11 -- confidence & correction UX -- live
+  getCorrections: (id: string) =>
+    request<{ items: CorrectionOut[] }>(`/api/v1/documents/${id}/corrections`),
+  reextractDocument: (id: string) =>
+    request<DocumentOut>(`/api/v1/documents/${id}/reextract`, { method: "POST" }),
 
   // Milestone 5 -- multi-format ingestion -- live
   ingestYoutubeVideo: (url: string) =>

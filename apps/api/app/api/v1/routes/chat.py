@@ -154,6 +154,7 @@ def send_message(
             retrievalConfidence=answer.retrieval_confidence,
             canOfferExternalFallback=result.can_offer_external_fallback,
             content=result.content,
+            sufficiencyReason=answer.sufficiency_reason,
             citations=[
                 CitationOut(
                     documentId=row.resource_id,

@@ -48,6 +48,13 @@ class AnswerOut(BaseModel):
     canOfferExternalFallback: bool
     content: str
     citations: list[CitationOut]
+    # Milestone 11 (Confidence & Correction UX): one of the five fixed
+    # sufficiency reason codes from services/sufficiency.py
+    # (no_candidates | strong_single_hit | insufficient_supporting_hits |
+    # below_min_score | top_score). Exposes Answer.sufficiency_reason,
+    # already computed and persisted since Milestone 8 -- no new
+    # computation. Optional/None for rows predating this field.
+    sufficiencyReason: str | None = None
 
 
 class SendMessageResponse(BaseModel):

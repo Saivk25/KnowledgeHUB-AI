@@ -54,6 +54,19 @@ concept whose only evidence was this resource is marked `UNUSED` rather
 than silently left dangling. No concept-creation route lives here or in
 app/api/v1/routes/concepts.py -- concepts are only ever created by
 app/services/ingestion_service.py's concept-linking stage.
+
+Milestone 11 note (Confidence & Correction UX): `_to_out` additionally
+surfaces the four `auto_*` reclassification fields (Resource.auto_*,
+already written on every classification run since Milestone 6 -- see
+app/models/resource.py -- but never returned by this API before now).
+`update_classification` now also inserts a `ResourceCorrection` row per
+changed field, capturing the pre-overwrite value/confidence; its own
+request/response shape and externally-visible behavior are otherwise
+unchanged. Two new routes: **`GET /documents/{id}/corrections`** (read-only
+history for the row above) and **`POST /documents/{id}/reextract`** (re-runs
+ingestion on a `READY` document whose extraction confidence is low). Both
+are new, additive routes -- `retry_document` and its route are untouched,
+zero lines changed. See docs/milestones/MILESTONE_11.md.
 """
 
 from __future__ import annotations
@@ -66,12 +79,15 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps import AppError, get_current_workspace
 from app.models.concept import Concept, ResourceConcept
+from app.models.correction import CorrectionField, ResourceCorrection
 from app.models.ingestion_job import IngestionJob
 from app.models.resource import Resource, ResourceContentCategory, ResourceContentSource, ResourceStatus
 from app.models.workspace import Workspace
 from app.schemas.document import (
     ClassificationUpdateRequest,
     ConceptLinkOut,
+    CorrectionListOut,
+    CorrectionOut,
     DocumentDetailOut,
     DocumentListOut,
     DocumentOut,
@@ -111,6 +127,10 @@ def _to_out(resource: Resource) -> DocumentOut:
         subject=resource.subject,
         subjectConfidence=resource.subject_confidence,
         subjectConfirmed=resource.subject_confirmed,
+        autoContentCategory=resource.auto_content_category,
+        autoContentCategoryConfidence=resource.auto_content_category_confidence,
+        autoSubject=resource.auto_subject,
+        autoSubjectConfidence=resource.auto_subject_confidence,
     )
 
 
@@ -469,15 +489,114 @@ def update_classification(
                 "INVALID_CATEGORY",
                 f"contentCategory must be one of: {', '.join(sorted(ResourceContentCategory.ALL))}.",
             )
+        # Milestone 11: log the pre-overwrite value/confidence before this
+        # field is corrected -- see app/models/correction.py and
+        # docs/milestones/MILESTONE_11.md Section 4.1.
+        db.add(
+            ResourceCorrection(
+                resource_id=resource.id,
+                workspace_id=workspace.id,
+                field=CorrectionField.CONTENT_CATEGORY,
+                previous_value=resource.content_category,
+                previous_confidence=resource.content_category_confidence,
+                new_value=body.contentCategory,
+            )
+        )
         resource.content_category = body.contentCategory
         resource.content_category_confidence = 1.0
         resource.content_category_confirmed = True
 
     if body.subject is not None:
         subject = body.subject.strip()[:200]
+        db.add(
+            ResourceCorrection(
+                resource_id=resource.id,
+                workspace_id=workspace.id,
+                field=CorrectionField.SUBJECT,
+                previous_value=resource.subject,
+                previous_confidence=resource.subject_confidence,
+                new_value=subject,
+            )
+        )
         resource.subject = subject or None
         resource.subject_confidence = 1.0
         resource.subject_confirmed = True
 
     db.commit()
+    return _to_out(resource)
+
+
+@router.get(
+    "/{document_id}/corrections",
+    response_model=CorrectionListOut,
+    summary="List a document's classification correction history",
+    description=(
+        "Milestone 11: every classification correction (content category "
+        "and/or subject) ever applied to this document via PATCH "
+        "/documents/{id}/classification, newest first. Read-only; there is "
+        "no way to create or edit a correction row directly."
+    ),
+)
+def list_corrections(
+    document_id: str,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: Session = Depends(get_db),
+):
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
+        raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
+
+    corrections = (
+        db.query(ResourceCorrection)
+        .filter(ResourceCorrection.resource_id == document_id)
+        .order_by(ResourceCorrection.corrected_at.desc())
+        .all()
+    )
+    return CorrectionListOut(
+        items=[
+            CorrectionOut(
+                id=c.id,
+                field=c.field,
+                previousValue=c.previous_value,
+                previousConfidence=c.previous_confidence,
+                newValue=c.new_value,
+                correctedAt=c.corrected_at.isoformat() if c.corrected_at else "",
+            )
+            for c in corrections
+        ]
+    )
+
+
+@router.post(
+    "/{document_id}/reextract",
+    response_model=DocumentOut,
+    summary="Re-run extraction on an already-processed document",
+    description=(
+        "Milestone 11: for a READY document whose extraction confidence is "
+        "low, re-runs the identical ingestion pipeline upload_document and "
+        "retry_document already use -- no new extraction logic. Only "
+        "READY documents are accepted (409 DOCUMENT_NOT_READY otherwise); "
+        "this is a separate, additive route from POST "
+        "/documents/{id}/retry, which remains unchanged and continues to "
+        "handle FAILED documents exactly as before."
+    ),
+)
+def reextract_document(
+    background_tasks: BackgroundTasks,
+    document_id: str,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: Session = Depends(get_db),
+):
+    resource = db.get(Resource, document_id)
+    if not resource or resource.workspace_id != workspace.id:
+        raise AppError(status.HTTP_404_NOT_FOUND, "DOCUMENT_NOT_FOUND", "Document not found.")
+    if resource.status != ResourceStatus.READY:
+        raise AppError(
+            status.HTTP_409_CONFLICT, "DOCUMENT_NOT_READY", "Only ready documents can be re-extracted."
+        )
+
+    resource.status = ResourceStatus.QUEUED
+    resource.error_message = None
+    db.commit()
+    background_tasks.add_task(_run_ingestion, resource.id)
     return _to_out(resource)
