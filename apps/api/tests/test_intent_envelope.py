@@ -105,6 +105,101 @@ def test_compare_two_resources_via_intents(registered_client, tmp_path):
     assert len(body["result"]["targets"]) == 2
 
 
+def test_quiz_generation_via_intents_matches_shared_envelope(registered_client, tmp_path):
+    client, _ = registered_client
+    doc_id = _upload_ready_pdf(client, tmp_path)
+    conv = client.post("/api/v1/conversations", json={}).json()
+
+    resp = client.post(
+        f"/api/v1/conversations/{conv['id']}/intents",
+        json={"intent": "QUIZ", "resourceId": doc_id, "questionCount": 1},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert _ENVELOPE_KEYS <= set(body.keys())
+    assert body["intent"] == "QUIZ"
+    assert body["result"]["kind"] == "quiz"
+    assert body["result"]["status"] == "AWAITING_ANSWERS"
+    # No answer key leaked to the client (MILESTONE_10.md Section 3.3).
+    for question in body["result"]["questions"]:
+        assert "correctChoice" not in question
+
+
+def test_flashcards_via_intents_matches_shared_envelope(registered_client, tmp_path):
+    client, _ = registered_client
+    doc_id = _upload_ready_pdf(client, tmp_path)
+    conv = client.post("/api/v1/conversations", json={}).json()
+
+    resp = client.post(
+        f"/api/v1/conversations/{conv['id']}/intents",
+        json={"intent": "FLASHCARDS", "resourceId": doc_id},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert _ENVELOPE_KEYS <= set(body.keys())
+    assert body["intent"] == "FLASHCARDS"
+    assert body["result"]["kind"] == "flashcards"
+
+
+def test_viva_start_turn_via_intents_matches_shared_envelope(registered_client, tmp_path):
+    client, _ = registered_client
+    doc_id = _upload_ready_pdf(client, tmp_path)
+    conv = client.post("/api/v1/conversations", json={}).json()
+
+    resp = client.post(
+        f"/api/v1/conversations/{conv['id']}/intents",
+        json={"intent": "VIVA", "resourceId": doc_id},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert _ENVELOPE_KEYS <= set(body.keys())
+    assert body["intent"] == "VIVA"
+    assert body["result"]["kind"] == "viva"
+    assert body["result"]["turnNumber"] == 1
+    assert body["result"]["previousEvaluation"] is None
+
+
+def test_revision_via_intents_matches_shared_envelope(registered_client, tmp_path):
+    client, _ = registered_client
+    _upload_ready_pdf(client, tmp_path)
+    conv = client.post("/api/v1/conversations", json={}).json()
+
+    resp = client.post(
+        f"/api/v1/conversations/{conv['id']}/intents",
+        json={"intent": "REVISION"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert _ENVELOPE_KEYS <= set(body.keys())
+    assert body["intent"] == "REVISION"
+    assert body["result"]["kind"] == "revision"
+
+
+def test_study_plan_via_intents_matches_shared_envelope(registered_client, tmp_path):
+    client, _ = registered_client
+    doc_a = _upload_ready_pdf(client, tmp_path, "a.pdf", "Content about apples.")
+    doc_b = _upload_ready_pdf(client, tmp_path, "b.pdf", "Content about oranges.")
+    conv = client.post("/api/v1/conversations", json={}).json()
+
+    resp = client.post(
+        f"/api/v1/conversations/{conv['id']}/intents",
+        json={
+            "intent": "STUDY_PLAN",
+            "horizonDays": 3,
+            "targets": [
+                {"label": "Apples", "resourceId": doc_a},
+                {"label": "Oranges", "resourceId": doc_b},
+            ],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert _ENVELOPE_KEYS <= set(body.keys())
+    assert body["intent"] == "STUDY_PLAN"
+    assert body["result"]["kind"] == "study_plan"
+    assert len(body["result"]["days"]) >= 1
+
+
 def test_messages_endpoint_still_works_unchanged(registered_client, tmp_path):
     """POST /messages (Milestone 8) must still work exactly as before --
     a separate, full-fidelity EXPLAIN path, not replaced by /intents (see

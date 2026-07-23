@@ -55,6 +55,9 @@ EXPECTED_TABLES = {
     "messages",
     "answers",
     "citations",
+    # Milestone 10 (Study Workflows, migration 0008_study_workflows):
+    "quiz_attempts",
+    "viva_sessions",
     "alembic_version",
 }
 
@@ -94,6 +97,37 @@ EXPECTED_CITATION_COLUMNS = {
     "excerpt",
     "citation_order",
     "target_label",
+}
+
+# Milestone 10 (Study Workflows, migration 0008_study_workflows): two new
+# tables, no existing table's columns change.
+EXPECTED_QUIZ_ATTEMPT_COLUMNS = {
+    "id",
+    "created_at",
+    "workspace_id",
+    "resource_id",
+    "concept_id",
+    "target_label",
+    "status",
+    "question_count",
+    "correct_count",
+    "score",
+    "questions_payload",
+    "graded_at",
+}
+
+EXPECTED_VIVA_SESSION_COLUMNS = {
+    "id",
+    "created_at",
+    "workspace_id",
+    "resource_id",
+    "concept_id",
+    "target_label",
+    "status",
+    "turn_count",
+    "max_turns",
+    "transcript_payload",
+    "completed_at",
 }
 
 EXPECTED_RESOURCE_COLUMNS = {
@@ -180,6 +214,12 @@ def test_upgrade_head_from_empty_creates_expected_schema(scratch_db_url):
 
     citation_columns = {c["name"] for c in inspector.get_columns("citations")}
     assert citation_columns == EXPECTED_CITATION_COLUMNS
+
+    quiz_attempt_columns = {c["name"] for c in inspector.get_columns("quiz_attempts")}
+    assert quiz_attempt_columns == EXPECTED_QUIZ_ATTEMPT_COLUMNS
+
+    viva_session_columns = {c["name"] for c in inspector.get_columns("viva_sessions")}
+    assert viva_session_columns == EXPECTED_VIVA_SESSION_COLUMNS
 
     columns_by_name = {c["name"]: c for c in inspector.get_columns("resources")}
     for name in NULLABLE_RESOURCE_COLUMNS:

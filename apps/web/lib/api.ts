@@ -12,8 +12,9 @@
  * `updateProfile` (Milestone 2), `listDocuments`/`getDocumentDetail`/
  * `uploadDocument`/`deleteDocument`/`retryDocument`/`fileUrl` (Milestone 3),
  * `listConcepts`/`getConceptDetail`/`getRelatedConcepts`/`mergeConcept`
- * (Milestone 7), and `createConversation`/`getConversation`/`sendMessage`
- * (Milestone 8) are all wired to live backend routers.
+ * (Milestone 7), `createConversation`/`getConversation`/`sendMessage`
+ * (Milestone 8), and `sendIntent` -- now dispatching all nine FR-8
+ * intents, Milestones 9-10 -- are all wired to live backend routers.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -219,7 +220,16 @@ export interface MessageOut {
 
 // -- Milestone 9: intent workflows (Explain, Compare, Summarize, Search) -
 
-export type IntentType = "EXPLAIN" | "SEARCH" | "SUMMARIZE" | "COMPARE";
+export type IntentType =
+  | "EXPLAIN"
+  | "SEARCH"
+  | "SUMMARIZE"
+  | "COMPARE"
+  | "QUIZ"
+  | "FLASHCARDS"
+  | "VIVA"
+  | "REVISION"
+  | "STUDY_PLAN";
 
 export interface CompareTarget {
   label: string;
@@ -235,6 +245,14 @@ export interface IntentRequest {
   conceptId?: string;
   targets?: CompareTarget[];
   useExternalFallback?: boolean;
+  // -- Milestone 10 (Study Workflows) --
+  questionCount?: number; // QUIZ: how many questions to generate (generation turn only)
+  quizId?: string; // QUIZ: grading turn, references the generation turn's quizId
+  quizAnswers?: QuizAnswerIn[]; // QUIZ: grading turn, the user's selections
+  sessionId?: string; // VIVA: continuing an existing session
+  vivaAnswer?: string; // VIVA: answer to the current question
+  targetDate?: string; // STUDY_PLAN: optional deadline (ISO date)
+  horizonDays?: number; // STUDY_PLAN: fallback window if no targetDate is given
 }
 
 export interface ExplainResultOut {
@@ -261,7 +279,97 @@ export interface CompareResultOut {
   content: string;
   targets: CompareTargetResultOut[];
 }
-export type IntentResultOut = ExplainResultOut | SearchResultOut | SummarizeResultOut | CompareResultOut;
+// -- Milestone 10: study workflows (Quiz me, Flashcards, Viva mode,
+// Revision mode, Study planner) -- extends Milestone 9's envelope
+// additively only; every field above is unchanged in meaning. -----------
+
+export interface QuizAnswerIn {
+  questionNumber: number;
+  selectedChoice: number;
+}
+
+export interface QuizQuestionOut {
+  questionNumber: number;
+  prompt: string;
+  choices: string[];
+}
+export interface QuizGradedQuestionOut {
+  questionNumber: number;
+  prompt: string;
+  choices: string[];
+  selectedChoice: number;
+  correctChoice: number;
+  isCorrect: boolean;
+  citation: CitationOut;
+}
+export interface QuizResultOut {
+  kind: "quiz";
+  quizId: string;
+  target: string;
+  status: "AWAITING_ANSWERS" | "GRADED";
+  questions?: QuizQuestionOut[];
+  gradedQuestions?: QuizGradedQuestionOut[];
+  score?: number;
+}
+
+export interface FlashcardOut {
+  front: string;
+  back: string;
+  citation: CitationOut;
+}
+export interface FlashcardsResultOut {
+  kind: "flashcards";
+  target: string;
+  cards: FlashcardOut[];
+}
+
+export interface VivaEvaluationOut {
+  verdict: "correct" | "partial" | "incorrect";
+  feedback: string;
+}
+export interface VivaResultOut {
+  kind: "viva";
+  sessionId: string;
+  target: string;
+  isComplete: boolean;
+  turnNumber: number;
+  previousEvaluation: VivaEvaluationOut | null;
+  nextQuestion: string | null;
+}
+
+export interface RevisionItemOut {
+  label: string;
+  resourceId: string | null;
+  conceptId: string | null;
+  reason: string;
+  priority: number;
+}
+export interface RevisionResultOut {
+  kind: "revision";
+  items: RevisionItemOut[];
+}
+
+export interface StudyPlanDayOut {
+  day: number;
+  date: string | null;
+  targets: string[];
+  note: string;
+}
+export interface StudyPlanResultOut {
+  kind: "study_plan";
+  days: StudyPlanDayOut[];
+}
+
+export type IntentResultOut =
+  | ExplainResultOut
+  | SearchResultOut
+  | SummarizeResultOut
+  | CompareResultOut
+  | QuizResultOut
+  | FlashcardsResultOut
+  | VivaResultOut
+  | RevisionResultOut
+  | StudyPlanResultOut;
 
 export interface IntentResponse {
   intent: IntentType;

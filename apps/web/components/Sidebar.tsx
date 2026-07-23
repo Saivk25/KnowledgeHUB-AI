@@ -8,13 +8,19 @@ import { useAuth } from "@/lib/auth-context";
 // are live routes. Milestone 7 (Concept Graph) adds Concepts. Milestone 8
 // (Local-First Retrieval & Provenance) adds AI Chat -- previously
 // prototyped under app/_future/, now a live route backed by the mounted
-// /api/v1/conversations router.
+// /api/v1/conversations router. Milestone 10 (Study Workflows) adds
+// Revision and Study Plan -- the two new intents that are whole pages of
+// their own rather than a panel embedded in an existing document/concept
+// detail page (Quiz me/Flashcards/Viva mode are the latter, see
+// components/StudyPanels.tsx).
 const NAV_ITEMS = [
   { href: "/workspace", label: "Workspace Home", icon: "home" },
   { href: "/chat", label: "AI Chat", icon: "chat" },
   { href: "/documents", label: "Documents", icon: "docs" },
   { href: "/documents/upload", label: "Upload Document", icon: "upload" },
   { href: "/concepts", label: "Concepts", icon: "concept" },
+  { href: "/revision", label: "Revision", icon: "revision" },
+  { href: "/study-plan", label: "Study Plan", icon: "plan" },
   { href: "/settings", label: "Settings", icon: "settings" },
 ];
 
@@ -31,6 +37,10 @@ function Icon({ name }: { name: string }) {
       return <svg className={common} viewBox="0 0 20 20" fill="none"><path d="M10 13V4m0 0 3.5 3.5M10 4 6.5 7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M4 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
     case "concept":
       return <svg className={common} viewBox="0 0 20 20" fill="none"><circle cx="6" cy="6" r="2.2" stroke="currentColor" strokeWidth="1.4"/><circle cx="15" cy="6" r="2.2" stroke="currentColor" strokeWidth="1.4"/><circle cx="10.5" cy="15" r="2.2" stroke="currentColor" strokeWidth="1.4"/><path d="M7.7 7.3 9 13m4.3-5.7L11 13" stroke="currentColor" strokeWidth="1.4"/></svg>;
+    case "revision":
+      return <svg className={common} viewBox="0 0 20 20" fill="none"><path d="M4 4h9l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M7 9h6M7 12.5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
+    case "plan":
+      return <svg className={common} viewBox="0 0 20 20" fill="none"><rect x="3.5" y="4" width="13" height="12.5" rx="1" stroke="currentColor" strokeWidth="1.4"/><path d="M3.5 8h13M7 4v3m6-3v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
     default:
       return <svg className={common} viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.4"/><path d="M10 3v2m0 10v2m7-7h-2M5 10H3m11.5-5.5-1.4 1.4M6.9 13.1l-1.4 1.4m9-1.4 1.4 1.4M6.9 6.9 5.5 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
   }

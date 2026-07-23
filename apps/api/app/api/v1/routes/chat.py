@@ -20,7 +20,17 @@ from app.schemas.chat import (
     MessageOut,
     SendMessageResponse,
 )
-from app.schemas.intents import IntentRequest, IntentResponse, IntentType, SearchResult
+from app.schemas.intents import (
+    FlashcardsResult,
+    IntentRequest,
+    IntentResponse,
+    IntentType,
+    QuizResult,
+    RevisionResult,
+    SearchResult,
+    StudyPlanResult,
+    VivaResult,
+)
 from app.services.intents.registry import get_intent_handler
 from app.services.retrieval_service import answer_question
 
@@ -170,6 +180,31 @@ def _describe_intent_request(payload: IntentRequest) -> str:
             return f"Summarize resource {payload.resourceId}"
         if payload.conceptId:
             return f"Summarize concept {payload.conceptId}"
+    # -- Milestone 10 (Study Workflows): additive branches only, no
+    # existing branch above this changed. --
+    if payload.intent == IntentType.QUIZ:
+        if payload.quizId:
+            return "Quiz: submitting answers"
+        if payload.resourceId:
+            return f"Quiz me on resource {payload.resourceId}"
+        if payload.conceptId:
+            return f"Quiz me on concept {payload.conceptId}"
+    if payload.intent == IntentType.FLASHCARDS:
+        if payload.resourceId:
+            return f"Flashcards for resource {payload.resourceId}"
+        if payload.conceptId:
+            return f"Flashcards for concept {payload.conceptId}"
+    if payload.intent == IntentType.VIVA:
+        if payload.sessionId:
+            return "Viva: submitting answer"
+        if payload.resourceId:
+            return f"Viva mode on resource {payload.resourceId}"
+        if payload.conceptId:
+            return f"Viva mode on concept {payload.conceptId}"
+    if payload.intent == IntentType.REVISION:
+        return "Revision mode"
+    if payload.intent == IntentType.STUDY_PLAN and payload.targets:
+        return "Study plan: " + ", ".join(t.label for t in payload.targets)
     return payload.question or f"{payload.intent} request"
 
 
@@ -184,6 +219,22 @@ def _extract_assistant_content(intent_response: IntentResponse) -> str:
         if result.assistedSynthesis:
             return result.assistedSynthesis
         return f"Found {len(result.hits)} matching result(s)."
+    # -- Milestone 10 (Study Workflows): additive branches only, no
+    # existing branch above this changed. --
+    if isinstance(result, QuizResult):
+        if result.status == "GRADED":
+            return f"Quiz: {result.score:.0%} correct" if result.score is not None else "Quiz graded."
+        return f"Quiz: {len(result.questions or [])} question(s) generated."
+    if isinstance(result, FlashcardsResult):
+        return f"Flashcards: {len(result.cards)} card(s) generated."
+    if isinstance(result, VivaResult):
+        if result.isComplete:
+            return "Viva: session complete."
+        return f"Viva: {result.nextQuestion}" if result.nextQuestion else "Viva: next question."
+    if isinstance(result, RevisionResult):
+        return f"Revision: {len(result.items)} item(s) flagged."
+    if isinstance(result, StudyPlanResult):
+        return f"Study plan: {len(result.days)} day(s) scheduled."
     return getattr(result, "content", "")
 
 

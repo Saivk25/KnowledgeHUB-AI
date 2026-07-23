@@ -137,6 +137,28 @@ class Settings(BaseSettings):
     # ...and at most this many evidence chunks resolved per target.
     COMPARE_MAX_EVIDENCE_PER_TARGET: int = 8
 
+    # -- Milestone 10 (Study Workflows) -- read by app/services/intents/
+    # quiz.py, flashcards.py, viva.py, revision.py, study_planner.py, and
+    # app/services/study_signals.py.
+    QUIZ_QUESTION_COUNT_DEFAULT: int = 5
+    QUIZ_MAX_QUESTIONS: int = 10
+    QUIZ_MAX_EVIDENCE_CHUNKS: int = 20
+    FLASHCARDS_COUNT_DEFAULT: int = 10
+    FLASHCARDS_MAX_COUNT: int = 20
+    # Viva sessions end after this many question/answer turns regardless
+    # of how the conversation is going (snapshotted onto VivaSession.max_turns
+    # at session start -- see app/models/study.py).
+    VIVA_MAX_TURNS: int = 6
+    VIVA_MAX_EVIDENCE_CHUNKS: int = 20
+    # Revision mode surfaces at most this many flagged concepts/resources.
+    REVISION_MAX_ITEMS: int = 10
+    # A graded quiz scoring below this fraction counts as "weak" for both
+    # Revision mode's flagging and Study planner's prioritization (see
+    # app/services/study_signals.py's assess_review_need()).
+    REVISION_LOW_SCORE_THRESHOLD: float = 0.5
+    STUDY_PLANNER_DEFAULT_HORIZON_DAYS: int = 7
+    STUDY_PLANNER_MAX_HORIZON_DAYS: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

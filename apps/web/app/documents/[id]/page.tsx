@@ -7,6 +7,7 @@ import AppShell from "@/components/AppShell";
 import CategoryBadge from "@/components/CategoryBadge";
 import CitationPill from "@/components/CitationPill";
 import SourceViewerModal from "@/components/SourceViewerModal";
+import { FlashcardsPanel, QuizPanel, VivaPanel } from "@/components/StudyPanels";
 import { api, ApiError, CitationOut, ConceptLinkOut, ContentCategory, DocumentOut, IngestionJobOut, SummarizeResultOut } from "@/lib/api";
 
 const STEPS = [
@@ -303,6 +304,14 @@ export default function DocumentDetailPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Milestone 10 (Study Workflows): Quiz me, Flashcards,
+                    Viva mode -- three self-contained panels, same
+                    "on-demand intent request" shape as Summarize above,
+                    reused from concepts/[id]/page.tsx via StudyPanels.tsx. */}
+                <QuizPanel target={{ resourceId: params.id }} />
+                <FlashcardsPanel target={{ resourceId: params.id }} />
+                <VivaPanel target={{ resourceId: params.id }} />
               </div>
             ) : (
               <div className="mt-6">

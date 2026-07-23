@@ -18,6 +18,7 @@ from app.models.resource import (
     ResourcePage,
     ResourceStatus,
 )
+from app.models.study import QuizAttempt, QuizAttemptStatus, VivaSession, VivaSessionStatus
 from app.models.user import User
 from app.models.workspace import Workspace
 
@@ -42,4 +43,8 @@ __all__ = [
     "Message",
     "Answer",
     "Citation",
+    "QuizAttempt",
+    "QuizAttemptStatus",
+    "VivaSession",
+    "VivaSessionStatus",
 ]

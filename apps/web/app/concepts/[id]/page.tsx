@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import { FlashcardsPanel, QuizPanel, VivaPanel } from "@/components/StudyPanels";
 import { api, ApiError, ConceptDetailOut, SummarizeResultOut } from "@/lib/api";
 
 // Milestone 7 (Concept Graph): the concept detail page -- evidence
@@ -135,6 +136,15 @@ export default function ConceptDetailPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Milestone 10 (Study Workflows): Quiz me, Flashcards, Viva
+                mode -- same three panels as the Document detail page,
+                targeting this concept instead of a resource. */}
+            <div className="space-y-4">
+              <QuizPanel target={{ conceptId: detail.concept.id }} />
+              <FlashcardsPanel target={{ conceptId: detail.concept.id }} />
+              <VivaPanel target={{ conceptId: detail.concept.id }} />
             </div>
 
             <div className="rounded-xl border border-edge bg-surface p-6">

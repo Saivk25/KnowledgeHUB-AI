@@ -27,6 +27,7 @@ is never ambiguous from a directory listing alone.
 | `services/embeddings.py` (`embed_one` on a query), `services/vector_repo.py` (`search`), `services/llm.py`, `services/retrieval_service.py`, `services/sufficiency.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
 | `schemas/chat.py`, `api/v1/routes/chat.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
 | `schemas/intents.py`, `services/intents/` (`base.py`, `explain.py`, `search.py`, `summarize.py`, `compare.py`, `registry.py`) | 9 -- Intent Workflows | **Yes** |
+| `models/study.py` (`QuizAttempt`, `VivaSession`), `services/study_signals.py`, `services/intents/` (`quiz.py`, `flashcards.py`, `viva.py`, `revision.py`, `study_planner.py`) | 10 -- Study Workflows | **Yes** |
 | `api/v1/router.py` | 2/3/7/8 (all aggregated here) | **Yes** -- imports `auth`, `workspace`, `documents`, `concepts`, and (as of Milestone 8) `chat` |
 
 Note on `services/embeddings.py` and `services/vector_repo.py`: both files
@@ -235,3 +236,55 @@ deviation from it. `models/answer.py` gained `intent`/`intent_payload`;
 `docs/milestones/MILESTONE_9.md` for the full design, including the three
 approved trade-offs (Compare's partial-evidence handling, provenance's
 unchanged 3-value contract, and Search's confidence-triggered LLM call).
+
+## Milestone 10 note (Study Workflows, per the roadmap's own numbering)
+
+Five new `IntentHandler`s complete the nine-intent set ADR-0016 started:
+`QuizIntent`, `FlashcardsIntent`, `VivaIntent`, `RevisionIntent`,
+`StudyPlannerIntent` (`services/intents/`), registered in the same
+`registry.py` alongside Milestone 9's four. `schemas/intents.py`'s
+`IntentType` and `IntentRequest` grow additively (new fields only,
+nothing renamed or repurposed); `IntentResult`'s discriminated union goes
+from four members to nine.
+
+Two new tables (migration `0008_study_workflows`, models in
+`app/models/study.py`): `QuizAttempt` (`questions_payload` holds the
+full generated answer key, server-side only) and `VivaSession`
+(`transcript_payload` holds the full turn-by-turn grading rubric and
+evidence, also server-side only). These exist because Quiz me and Viva
+mode are the first two intents in this codebase that are genuinely
+multi-turn -- a generation/start turn and a later grading/continuation
+turn, with private state that must survive between them without ever
+being echoed back to the client in between. See
+`docs/adr/0017-study-workflows.md` decision 1 for why this is two new
+tables and not a widened `Answer.intent_payload`.
+
+New shared service module `services/study_signals.py` --
+`assess_review_need()` is called by both `RevisionIntent` and
+`StudyPlannerIntent` (never duplicated), deriving a priority/reason from
+a concept or resource's own `QuizAttempt`/`VivaSession` history plus
+existing `ResourceConcept` evidence density. It reads Milestone 7's
+concept graph and this milestone's two new tables; it does not read or
+modify anything belonging to Milestone 9's four intents.
+
+`services/llm.py` gained four new `LLMProvider` methods --
+`generate_quiz`, `generate_flashcards`, `conduct_viva_turn`,
+`narrate_study_plan` -- following the same real-vs-honest-fallback
+pattern as `answer_general_knowledge`/`summarize`/`compare`:
+`OpenAIChatProvider` calls the model (one retry on malformed JSON, then a
+`RuntimeError`); `ExtractiveFallbackProvider` never calls out --
+cloze-deletion quiz questions, sentence-based flashcards,
+keyword-overlap viva grading, and pass-through study-plan narration
+(the `reason` text unchanged), so the whole golden path stays runnable
+with zero paid dependencies, same as every provider-backed feature
+before it.
+
+`api/v1/routes/chat.py`'s transcript-rendering helpers
+(`_describe_intent_request`, `_extract_assistant_content`) gained five
+new branches, one per new intent -- the only touch to a Milestone 9 file
+this milestone made, and explicitly approved as scoped/cosmetic-only
+(see `docs/adr/0017-study-workflows.md` decision 5). No other Milestone
+9 file changed. No changes to `Resource`/`Concept`/`ResourceConcept`/
+`ConceptRelationship`/`Answer`/`Citation`. See
+`docs/adr/0017-study-workflows.md` and `docs/milestones/MILESTONE_10.md`
+for the full design, including all five approved decisions.
