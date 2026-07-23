@@ -40,6 +40,18 @@ class EvidenceChunk:
     content: str
 
 
+@dataclass
+class ComparisonEvidence:
+    """One side of a Compare request (Milestone 9): a human-readable
+    label plus whatever evidence was resolved for it (empty if that
+    target genuinely has no local evidence -- see
+    app/services/intents/compare.py, which decides that, never this
+    class)."""
+
+    label: str
+    evidence: list[EvidenceChunk]
+
+
 class LLMProvider(ABC):
     name: str
 
@@ -61,6 +73,31 @@ class LLMProvider(ABC):
         """
         ...
 
+    @abstractmethod
+    def summarize(self, target_label: str, evidence: list[EvidenceChunk]) -> str:
+        """
+        Milestone 9 (Intent Workflows): produce a synthesized summary of
+        `evidence` (already resolved by app/services/intents/summarize.py
+        -- a resource's full chunk set, a concept's evidence chunks, or a
+        freeform query's retrieved candidates). Must still cite by [n]
+        like answer() -- summarizing is not license to drop the citation
+        discipline this codebase enforces everywhere else.
+        """
+        ...
+
+    @abstractmethod
+    def compare(self, targets: list[ComparisonEvidence]) -> str:
+        """
+        Milestone 9 (Intent Workflows): produce a structured comparison
+        across 2+ ComparisonEvidence targets. A target with empty evidence
+        must be described as having no local coverage, never silently
+        skipped or filled from general knowledge (MILESTONE_9.md Section 4
+        decision 1) -- app/services/intents/compare.py is what decided
+        that evidence was empty; this method's job is only to say so
+        honestly in the generated text.
+        """
+        ...
+
 
 SYSTEM_INSTRUCTIONS = (
     "You are KnowledgeHub AI, an enterprise document assistant. Answer ONLY using "
@@ -78,6 +115,24 @@ GENERAL_KNOWLEDGE_SYSTEM_INSTRUCTIONS = (
     "documents. Never claim a fact came from their workspace."
 )
 
+# Milestone 9 (Intent Workflows):
+SUMMARIZE_SYSTEM_INSTRUCTIONS = (
+    "You are KnowledgeHub AI. Summarize ONLY using the numbered evidence excerpts "
+    "provided. Every factual claim must be followed by its citation number in "
+    "square brackets, e.g. [1]. Do not add information the evidence does not "
+    "contain. Produce a concise, well-organized summary, not a list of the "
+    "excerpts themselves."
+)
+
+COMPARE_SYSTEM_INSTRUCTIONS = (
+    "You are KnowledgeHub AI. You will be given two or more labeled targets, each "
+    "with its own numbered evidence excerpts (which may be empty for a target). "
+    "Compare and contrast the targets using ONLY the evidence given for each one "
+    "-- never use one target's evidence to fill a gap in another's. Every factual "
+    "claim must cite its source with [n]. If a target has no evidence, say so "
+    "plainly for that target instead of guessing or using general knowledge."
+)
+
 
 def _build_prompt(question: str, evidence: list[EvidenceChunk]) -> str:
     evidence_block = "\n\n".join(
@@ -89,6 +144,32 @@ def _build_prompt(question: str, evidence: list[EvidenceChunk]) -> str:
         f"QUESTION: {question}\n\n"
         f"ANSWER (cite using [n]):"
     )
+
+
+def _build_summarize_prompt(target_label: str, evidence: list[EvidenceChunk]) -> str:
+    evidence_block = "\n\n".join(
+        f"[{e.order}] (source: {e.document_filename}, page {e.page_number})\n{e.content}" for e in evidence
+    )
+    return (
+        f"{SUMMARIZE_SYSTEM_INSTRUCTIONS}\n\n"
+        f"TARGET TO SUMMARIZE: {target_label}\n\n"
+        f"EVIDENCE:\n{evidence_block}\n\n"
+        f"SUMMARY (cite using [n]):"
+    )
+
+
+def _build_compare_prompt(targets: list[ComparisonEvidence]) -> str:
+    blocks = []
+    for target in targets:
+        if not target.evidence:
+            blocks.append(f"=== {target.label} ===\n(no local evidence found for this target)")
+            continue
+        evidence_block = "\n\n".join(
+            f"[{e.order}] (source: {e.document_filename}, page {e.page_number})\n{e.content}"
+            for e in target.evidence
+        )
+        blocks.append(f"=== {target.label} ===\n{evidence_block}")
+    return f"{COMPARE_SYSTEM_INSTRUCTIONS}\n\n" + "\n\n".join(blocks) + "\n\nCOMPARISON (cite using [n]):"
 
 
 class OpenAIChatProvider(LLMProvider):
@@ -132,6 +213,38 @@ class OpenAIChatProvider(LLMProvider):
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
 
+    def summarize(self, target_label: str, evidence: list[EvidenceChunk]) -> str:
+        prompt = _build_summarize_prompt(target_label, evidence)
+        response = self._client.post(
+            "/chat/completions",
+            json={
+                "model": settings.OPENAI_CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": SUMMARIZE_SYSTEM_INSTRUCTIONS},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+            },
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
+    def compare(self, targets: list[ComparisonEvidence]) -> str:
+        prompt = _build_compare_prompt(targets)
+        response = self._client.post(
+            "/chat/completions",
+            json={
+                "model": settings.OPENAI_CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": COMPARE_SYSTEM_INSTRUCTIONS},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+            },
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
 
 class ExtractiveFallbackProvider(LLMProvider):
     name = "extractive-fallback"
@@ -155,6 +268,37 @@ class ExtractiveFallbackProvider(LLMProvider):
             "(set OPENAI_API_KEY) -- this workspace is currently running "
             "without one, so I can only answer from your own documents."
         )
+
+    def summarize(self, target_label: str, evidence: list[EvidenceChunk]) -> str:
+        if not evidence:
+            return f"No evidence was found to summarize for {target_label}."
+        lines = [
+            f"No synthesis model is configured, so here are the excerpts found for "
+            f"{target_label} (set OPENAI_API_KEY for a real synthesized summary):"
+        ]
+        for e in evidence:
+            snippet = e.content.strip()
+            if len(snippet) > 320:
+                snippet = snippet[:320].rsplit(" ", 1)[0] + "..."
+            lines.append(f"{snippet} [{e.order}]")
+        return "\n\n".join(lines)
+
+    def compare(self, targets: list[ComparisonEvidence]) -> str:
+        lines = [
+            "No synthesis model is configured, so here is each target's evidence "
+            "listed side by side (set OPENAI_API_KEY for a real synthesized comparison):"
+        ]
+        for target in targets:
+            lines.append(f"\n{target.label}:")
+            if not target.evidence:
+                lines.append("(no local evidence found for this target)")
+                continue
+            for e in target.evidence:
+                snippet = e.content.strip()
+                if len(snippet) > 240:
+                    snippet = snippet[:240].rsplit(" ", 1)[0] + "..."
+                lines.append(f"{snippet} [{e.order}]")
+        return "\n".join(lines)
 
 
 _provider: LLMProvider | None = None

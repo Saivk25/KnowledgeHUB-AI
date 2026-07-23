@@ -117,6 +117,26 @@ class Settings(BaseSettings):
     # code path.
     RETRIEVAL_LATENCY_TARGET_MS: int = 2000
 
+    # -- Milestone 9 (Intent Workflows) -- read by app/services/intents/.
+    # Search returns this many ranked hits (no sufficiency gate applies to
+    # Search itself -- see search.py's docstring).
+    SEARCH_TOP_K: int = 10
+    # Below this score, Search additionally calls the LLM for a grounded,
+    # clearly-labeled low-confidence synthesis on top of the always-
+    # returned ranked hits (approved design, MILESTONE_9.md Section 4
+    # decision 3). At or above it, Search never calls an LLM at all.
+    # Defaults to SUFFICIENCY_MIN_SCORE's value, not a reference to it, so
+    # the two can be tuned independently later without a hidden coupling.
+    SEARCH_LLM_CONFIDENCE_THRESHOLD: float = 0.35
+    # Concept-target Summarize pulls at most this many evidence chunks
+    # (highest ResourceConcept.confidence first) across every resource
+    # that evidences the concept.
+    SUMMARIZE_MAX_EVIDENCE_CHUNKS: int = 20
+    # Compare accepts at most this many targets per request.
+    COMPARE_MAX_TARGETS: int = 4
+    # ...and at most this many evidence chunks resolved per target.
+    COMPARE_MAX_EVIDENCE_PER_TARGET: int = 8
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -19,4 +19,11 @@ class Citation(Base, UUIDPK):
     excerpt: Mapped[str] = mapped_column(Text, nullable=False)
     citation_order: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # Milestone 9 (Intent Workflows): lets Compare (and concept-targeted
+    # Summarize) attribute a citation to a specific side/source (e.g.
+    # "Resource A", a concept's name) without a new table. Null for
+    # Explain/Search/resource-targeted Summarize, where a citation only
+    # ever belongs to the one answer as a whole.
+    target_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     answer = relationship("Answer", back_populates="citations")

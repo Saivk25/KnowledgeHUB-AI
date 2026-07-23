@@ -335,6 +335,162 @@ def _insufficient_result(
     )
 
 
+def resolve_question_candidates(
+    db: Session, workspace_id: str, question: str
+) -> tuple[dict[str, _Candidate], list[ScoredCandidate]]:
+    """Milestone 9: the hybrid vector+concept candidate resolution shared
+    by every freeform-question intent -- EXPLAIN (via answer_question
+    below), SEARCH, and SUMMARIZE/COMPARE's freeform-question mode. Embeds
+    the question, builds and scores candidates, but does NOT decide
+    sufficiency or build citations -- that decision is intent-specific
+    (answer_question gates on is_sufficient; search.py never gates; see
+    app/services/intents/). Returns an empty scored list (not an error)
+    when there are no candidates at all, mirroring the empty-candidates
+    case every caller already has to handle."""
+    embedder = get_embedding_provider()
+    query_vector = embedder.embed_one(question)
+
+    ready_doc_ids = {
+        d.id
+        for d in db.query(Resource.id)
+        .filter(Resource.workspace_id == workspace_id, Resource.status == ResourceStatus.READY)
+        .all()
+    }
+
+    candidates = _build_candidates(db, workspace_id, question, query_vector, ready_doc_ids)
+    if not candidates:
+        return candidates, []
+    scored = _score_candidates(db, question, candidates)
+    return candidates, scored
+
+
+def resolve_citations_and_evidence(
+    db: Session, ordered: list[_Candidate]
+) -> tuple[list[EvidenceChunk], list[CitationResult]]:
+    """Public entry point for app/services/intents/ into
+    _build_citations_and_evidence (Section 3.4's evidence-resolution
+    helpers) -- Search's confidence-triggered synthesis needs both the
+    LLM-facing evidence list and the response-facing citations from the
+    same ranked candidates EXPLAIN uses."""
+    return _build_citations_and_evidence(db, ordered)
+
+
+def resolve_freeform_evidence(
+    db: Session, workspace_id: str, question: str, top_k: int | None = None
+) -> tuple[list[EvidenceChunk], list[CitationResult], SufficiencyVerdict]:
+    """Milestone 9: the freeform-question path shared by SUMMARIZE's
+    freeform mode and COMPARE's freeform-target mode -- hybrid retrieval +
+    scoring + the real sufficiency verdict, exactly as EXPLAIN uses it.
+    Callers decide what an insufficient verdict means for their own
+    response shape; FR-10 (never label local knowledge that isn't there)
+    applies identically regardless of which intent is asking."""
+    candidates, scored = resolve_question_candidates(db, workspace_id, question)
+    if not candidates:
+        return [], [], compute_sufficiency([])
+    verdict = compute_sufficiency(scored)
+    limit = top_k if top_k is not None else settings.TOP_K
+    ordered = sorted(candidates.values(), key=lambda c: c.final_score, reverse=True)[:limit]
+    evidence, citations = _build_citations_and_evidence(db, ordered)
+    return evidence, citations, verdict
+
+
+def resolve_resource_evidence(
+    db: Session, resource_id: str, max_chunks: int | None = None
+) -> tuple[list[EvidenceChunk], list[CitationResult]]:
+    """Milestone 9: a resource's chunks in page/chunk order -- not
+    similarity-ranked, since the point is completeness of one document,
+    not relevance ranking -- for SUMMARIZE's resource-target mode and
+    COMPARE's resource-target evidence resolution. A READY resource
+    always has at least one chunk (Milestone 3's ingestion pipeline
+    guarantees this), so this only returns empty for a resource that
+    doesn't exist or isn't READY."""
+    resource = db.get(Resource, resource_id)
+    if resource is None or resource.status != ResourceStatus.READY:
+        return [], []
+
+    chunks = (
+        db.query(ResourceChunk)
+        .filter(ResourceChunk.resource_id == resource_id)
+        .order_by(ResourceChunk.page_number.asc(), ResourceChunk.chunk_index.asc())
+        .all()
+    )
+    if max_chunks is not None:
+        chunks = chunks[:max_chunks]
+
+    filename = resource.filename or "unknown"
+    evidence: list[EvidenceChunk] = []
+    citations: list[CitationResult] = []
+    for order, chunk in enumerate(chunks, start=1):
+        evidence.append(
+            EvidenceChunk(
+                order=order, document_filename=filename, page_number=chunk.page_number, content=chunk.content
+            )
+        )
+        citations.append(
+            CitationResult(
+                document_id=resource.id,
+                document_filename=filename,
+                chunk_id=chunk.id,
+                page_number=chunk.page_number,
+                excerpt=chunk.content[:500],
+                order=order,
+            )
+        )
+    return evidence, citations
+
+
+def resolve_concept_evidence(
+    db: Session, concept_id: str, max_chunks: int | None = None
+) -> tuple[list[EvidenceChunk], list[CitationResult]]:
+    """Milestone 9: a concept's evidence chunks (via
+    ResourceConcept.evidence_chunk_id), highest-confidence first, across
+    every resource that evidences it -- for SUMMARIZE's concept-target
+    mode and COMPARE's concept-target evidence resolution. A concept is
+    never created without at least one evidence link
+    (app/services/concept_graph.py's resolve_concept() invariant), so a
+    concept that exists in this workspace always has evidence to return."""
+    links = (
+        db.query(ResourceConcept)
+        .filter(ResourceConcept.concept_id == concept_id)
+        .order_by(ResourceConcept.confidence.desc())
+        .all()
+    )
+    if max_chunks is not None:
+        links = links[:max_chunks]
+
+    resource_ids = {link.resource_id for link in links}
+    resources_by_id = {r.id: r for r in db.query(Resource).filter(Resource.id.in_(resource_ids)).all()}
+    chunk_ids = {link.evidence_chunk_id for link in links}
+    chunks_by_id = {c.id: c for c in db.query(ResourceChunk).filter(ResourceChunk.id.in_(chunk_ids)).all()}
+
+    evidence: list[EvidenceChunk] = []
+    citations: list[CitationResult] = []
+    order = 0
+    for link in links:
+        resource = resources_by_id.get(link.resource_id)
+        chunk = chunks_by_id.get(link.evidence_chunk_id)
+        if resource is None or chunk is None:
+            continue
+        order += 1
+        filename = resource.filename or "unknown"
+        evidence.append(
+            EvidenceChunk(
+                order=order, document_filename=filename, page_number=chunk.page_number, content=chunk.content
+            )
+        )
+        citations.append(
+            CitationResult(
+                document_id=resource.id,
+                document_filename=filename,
+                chunk_id=chunk.id,
+                page_number=chunk.page_number,
+                excerpt=chunk.content[:500],
+                order=order,
+            )
+        )
+    return evidence, citations
+
+
 def answer_question(
     db: Session,
     workspace_id: str,
@@ -353,17 +509,7 @@ def answer_question(
     """
     t0 = time.monotonic()
 
-    embedder = get_embedding_provider()
-    query_vector = embedder.embed_one(question)
-
-    ready_doc_ids = {
-        d.id
-        for d in db.query(Resource.id)
-        .filter(Resource.workspace_id == workspace_id, Resource.status == ResourceStatus.READY)
-        .all()
-    }
-
-    candidates = _build_candidates(db, workspace_id, question, query_vector, ready_doc_ids)
+    candidates, scored = resolve_question_candidates(db, workspace_id, question)
     retrieval_ms = int((time.monotonic() - t0) * 1000)
 
     if not candidates:
@@ -372,7 +518,6 @@ def answer_question(
             workspace_id, verdict, retrieval_ms, question, use_external_fallback, allow_external_fallback
         )
 
-    scored = _score_candidates(db, question, candidates)
     verdict = compute_sufficiency(scored)
 
     if not verdict.is_sufficient:

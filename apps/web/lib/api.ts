@@ -193,9 +193,13 @@ export type Provenance = "LOCAL" | "HYBRID" | "EXTERNAL";
 export interface CitationOut {
   documentId: string;
   documentFilename: string;
+  chunkId: string;
   pageNumber: number;
   excerpt: string;
   order: number;
+  // Milestone 9: which Compare target this citation supports. Undefined
+  // for Explain/Search/resource- or concept-targeted Summarize.
+  targetLabel?: string | null;
 }
 export interface AnswerOut {
   id: string;
@@ -211,6 +215,63 @@ export interface MessageOut {
   id: string;
   role: "user" | "assistant";
   content: string;
+}
+
+// -- Milestone 9: intent workflows (Explain, Compare, Summarize, Search) -
+
+export type IntentType = "EXPLAIN" | "SEARCH" | "SUMMARIZE" | "COMPARE";
+
+export interface CompareTarget {
+  label: string;
+  resourceId?: string;
+  conceptId?: string;
+  question?: string;
+}
+
+export interface IntentRequest {
+  intent: IntentType;
+  question?: string;
+  resourceId?: string;
+  conceptId?: string;
+  targets?: CompareTarget[];
+  useExternalFallback?: boolean;
+}
+
+export interface ExplainResultOut {
+  kind: "explain";
+  content: string;
+}
+export interface SearchResultOut {
+  kind: "search";
+  hits: CitationOut[];
+  assistedSynthesis: string | null;
+}
+export interface SummarizeResultOut {
+  kind: "summarize";
+  content: string;
+  target: string;
+}
+export interface CompareTargetResultOut {
+  label: string;
+  hasEvidence: boolean;
+  citations: CitationOut[];
+}
+export interface CompareResultOut {
+  kind: "compare";
+  content: string;
+  targets: CompareTargetResultOut[];
+}
+export type IntentResultOut = ExplainResultOut | SearchResultOut | SummarizeResultOut | CompareResultOut;
+
+export interface IntentResponse {
+  intent: IntentType;
+  status: "OK" | "INSUFFICIENT" | "ERROR";
+  provenance: Provenance | null;
+  sufficiencyScore: number;
+  retrievalConfidence: number;
+  canOfferExternalFallback: boolean;
+  citations: CitationOut[];
+  result: IntentResultOut;
 }
 
 export const api = {
@@ -279,5 +340,12 @@ export const api = {
     request<{ userMessage: MessageOut; answer: AnswerOut }>(`/api/v1/conversations/${id}/messages`, {
       method: "POST",
       body: JSON.stringify({ content, useExternalFallback }),
+    }),
+
+  // Milestone 9 -- intent workflows -- live
+  sendIntent: (conversationId: string, body: IntentRequest) =>
+    request<IntentResponse>(`/api/v1/conversations/${conversationId}/intents`, {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 };

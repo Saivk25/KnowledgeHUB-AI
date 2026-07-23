@@ -66,6 +66,36 @@ EXPECTED_WORKSPACE_COLUMNS = {
     "allow_external_fallback",
 }
 
+# Milestone 9 (Intent Workflows, migration 0007_intent_workflows): no new
+# tables -- Compare/Summarize read existing resource/concept data -- just
+# two columns on `answers` and one on `citations`.
+EXPECTED_ANSWER_COLUMNS = {
+    "id",
+    "created_at",
+    "message_id",
+    "model_name",
+    "retrieval_latency_ms",
+    "generation_latency_ms",
+    "status",
+    "provenance",
+    "sufficiency_score",
+    "retrieval_confidence",
+    "sufficiency_reason",
+    "intent",
+    "intent_payload",
+}
+
+EXPECTED_CITATION_COLUMNS = {
+    "id",
+    "answer_id",
+    "resource_id",
+    "chunk_id",
+    "page_number",
+    "excerpt",
+    "citation_order",
+    "target_label",
+}
+
 EXPECTED_RESOURCE_COLUMNS = {
     "id",
     "created_at",
@@ -144,6 +174,12 @@ def test_upgrade_head_from_empty_creates_expected_schema(scratch_db_url):
 
     workspace_columns = {c["name"] for c in inspector.get_columns("workspaces")}
     assert workspace_columns == EXPECTED_WORKSPACE_COLUMNS
+
+    answer_columns = {c["name"] for c in inspector.get_columns("answers")}
+    assert answer_columns == EXPECTED_ANSWER_COLUMNS
+
+    citation_columns = {c["name"] for c in inspector.get_columns("citations")}
+    assert citation_columns == EXPECTED_CITATION_COLUMNS
 
     columns_by_name = {c["name"]: c for c in inspector.get_columns("resources")}
     for name in NULLABLE_RESOURCE_COLUMNS:

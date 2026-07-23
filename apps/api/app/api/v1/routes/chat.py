@@ -20,6 +20,8 @@ from app.schemas.chat import (
     MessageOut,
     SendMessageResponse,
 )
+from app.schemas.intents import IntentRequest, IntentResponse, IntentType, SearchResult
+from app.services.intents.registry import get_intent_handler
 from app.services.retrieval_service import answer_question
 
 router = APIRouter(prefix="/conversations", tags=["chat"])
@@ -146,6 +148,7 @@ def send_message(
                 CitationOut(
                     documentId=row.resource_id,
                     documentFilename=filename,
+                    chunkId=row.chunk_id,
                     pageNumber=row.page_number,
                     excerpt=row.excerpt,
                     order=row.citation_order,
@@ -154,6 +157,121 @@ def send_message(
             ],
         ),
     )
+
+
+def _describe_intent_request(payload: IntentRequest) -> str:
+    """A plain-text description of an intent request, for the
+    conversation transcript's user-turn Message row -- never used for
+    retrieval itself, just for the human-readable history."""
+    if payload.intent == IntentType.COMPARE and payload.targets:
+        return "Compare: " + " vs ".join(t.label for t in payload.targets)
+    if payload.intent == IntentType.SUMMARIZE:
+        if payload.resourceId:
+            return f"Summarize resource {payload.resourceId}"
+        if payload.conceptId:
+            return f"Summarize concept {payload.conceptId}"
+    return payload.question or f"{payload.intent} request"
+
+
+def _extract_assistant_content(intent_response: IntentResponse) -> str:
+    """A plain-text rendering of whatever `result` payload this intent
+    produced, for the conversation transcript's assistant-turn Message
+    row. Every result type except SearchResult carries a single
+    `content` string; Search's shape (a ranked hit list plus an optional
+    synthesis) needs its own rendering."""
+    result = intent_response.result
+    if isinstance(result, SearchResult):
+        if result.assistedSynthesis:
+            return result.assistedSynthesis
+        return f"Found {len(result.hits)} matching result(s)."
+    return getattr(result, "content", "")
+
+
+@router.post("/{conversation_id}/intents", response_model=IntentResponse, status_code=status.HTTP_201_CREATED)
+def create_intent(
+    conversation_id: str,
+    payload: IntentRequest,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: Session = Depends(get_db),
+):
+    """
+    Milestone 9: the one real dispatch entry point for every intent
+    (EXPLAIN/SEARCH/SUMMARIZE/COMPARE, and whatever Milestone 10 adds) --
+    see app/services/intents/registry.py. `POST /messages` above is kept,
+    unchanged, as a separate, full-fidelity path specifically for EXPLAIN
+    (it persists retrieval latency/model-name detail this generic route's
+    IntentResponse envelope deliberately doesn't carry -- see
+    docs/milestones/MILESTONE_9.md's implementation notes on why this is
+    a refinement of, not a deviation from, the approved "thin wrapper"
+    design: both paths call the identical retrieval_service.answer_question(),
+    so there is still exactly one implementation of the retrieval logic,
+    just two persistence granularities for two different call sites).
+    """
+    conversation = db.get(Conversation, conversation_id)
+    if not conversation or conversation.workspace_id != workspace.id:
+        raise AppError(status.HTTP_404_NOT_FOUND, "CONVERSATION_NOT_FOUND", "Conversation not found.")
+
+    ready_doc_count = (
+        db.query(Resource)
+        .filter(Resource.workspace_id == workspace.id, Resource.status == ResourceStatus.READY)
+        .count()
+    )
+    if ready_doc_count == 0:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "NO_READY_DOCUMENTS",
+            "Upload and wait for at least one document to finish processing before using this.",
+        )
+
+    user_message = Message(
+        conversation_id=conversation.id, role="user", content=_describe_intent_request(payload)
+    )
+    db.add(user_message)
+    db.commit()
+
+    try:
+        handler = get_intent_handler(payload.intent)
+    except ValueError as exc:
+        raise AppError(status.HTTP_400_BAD_REQUEST, "UNKNOWN_INTENT", str(exc)) from exc
+
+    intent_response = handler.handle(db, workspace, payload)
+
+    assistant_message = Message(
+        conversation_id=conversation.id, role="assistant", content=_extract_assistant_content(intent_response)
+    )
+    db.add(assistant_message)
+    db.flush()
+
+    answer = Answer(
+        message_id=assistant_message.id,
+        status=intent_response.status,
+        provenance=intent_response.provenance,
+        sufficiency_score=intent_response.sufficiencyScore,
+        retrieval_confidence=intent_response.retrievalConfidence,
+        intent=intent_response.intent,
+        intent_payload=intent_response.result.model_dump_json(),
+    )
+    db.add(answer)
+    db.flush()
+
+    for c in intent_response.citations:
+        db.add(
+            Citation(
+                answer_id=answer.id,
+                resource_id=c.documentId,
+                chunk_id=c.chunkId,
+                page_number=c.pageNumber,
+                excerpt=c.excerpt,
+                citation_order=c.order,
+                target_label=c.targetLabel,
+            )
+        )
+
+    if conversation.title == "New conversation":
+        conversation.title = _describe_intent_request(payload)[:80]
+
+    db.commit()
+    return intent_response
 
 
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

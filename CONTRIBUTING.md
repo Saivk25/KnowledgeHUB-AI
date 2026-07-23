@@ -15,12 +15,22 @@ a short discussion in an issue before a PR saves everyone time.
 ## Project workflow
 
 Every milestone in this project follows the same sequence: **design ->
-implementation -> verification -> freeze -> tag**. Frozen milestones
-(everything with a `docs/milestones/MILESTONE_N.md` marked "Implemented
-and Verified" and a matching git tag) are not retroactively modified --
-if you find a real bug in frozen code, open an issue describing it rather
-than sending a PR that changes frozen-milestone files directly; it'll be
-addressed as a fix in the current or next milestone with its own tests.
+implementation -> verification -> freeze -> tag -> README refresh**.
+Frozen milestones (everything with a `docs/milestones/MILESTONE_N.md`
+marked "Implemented and Verified" and a matching git tag) are not
+retroactively modified -- if you find a real bug in frozen code, open an
+issue describing it rather than sending a PR that changes frozen-
+milestone files directly; it'll be addressed as a fix in the current or
+next milestone with its own tests.
+
+**README refresh (15-20 minutes, right after every tag).** Immediately
+after freezing and tagging a milestone, update `README.md`'s Part 2
+("What's Actually Built So Far") and the Roadmap table before moving on
+to the next milestone's design phase. This is cheap to do the same day
+and expensive to reconstruct later -- it's what keeps the repo's public
+front page honest instead of drifting stale for several milestones (see
+the Milestone 8 -> polish-pass history in `CHANGELOG.md` for what that
+drift looked like in practice).
 
 ## Development setup
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { api, ApiError, ConceptDetailOut } from "@/lib/api";
+import { api, ApiError, ConceptDetailOut, SummarizeResultOut } from "@/lib/api";
 
 // Milestone 7 (Concept Graph): the concept detail page -- evidence
 // (which resources support this concept, and how), one-hop related
@@ -17,6 +17,13 @@ export default function ConceptDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
+  // Milestone 9 (Intent Workflows): Summarize this concept -- an
+  // on-demand intent request, distinct from Vision v2's Phase 2
+  // "concept auto-synthesis" (a persisted, continuously-updated rolling
+  // summary), which is explicitly out of this milestone's scope.
+  const [summarizing, setSummarizing] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -31,6 +38,25 @@ export default function ConceptDetailPage() {
   useEffect(() => {
     load();
   }, [params.id]);
+
+  const onSummarize = async () => {
+    if (!detail) return;
+    setSummarizing(true);
+    setSummaryError(null);
+    try {
+      const conv = await api.createConversation();
+      const res = await api.sendIntent(conv.id, { intent: "SUMMARIZE", conceptId: detail.concept.id });
+      if (res.status !== "OK") {
+        setSummaryError("Couldn't find enough evidence to summarize this concept.");
+        return;
+      }
+      setSummary((res.result as SummarizeResultOut).content);
+    } catch (err) {
+      setSummaryError(err instanceof ApiError ? err.message : "Couldn't summarize this concept.");
+    } finally {
+      setSummarizing(false);
+    }
+  };
 
   const onMerge = async () => {
     if (!detail?.concept.possibleDuplicateOfConceptId) return;
@@ -74,6 +100,21 @@ export default function ConceptDetailPage() {
               <p className="mt-2 text-xs text-slate-400">
                 {detail.concept.evidenceCount} evidence link{detail.concept.evidenceCount === 1 ? "" : "s"}
               </p>
+
+              {/* Milestone 9: Summarize this concept -- on-demand, not
+                  the persisted rolling auto-synthesis Vision v2 Phase 2
+                  describes (out of scope here). */}
+              <div className="mt-4">
+                <button
+                  onClick={onSummarize}
+                  disabled={summarizing}
+                  className="rounded-lg border border-indigo px-3 py-1.5 text-xs font-medium text-indigo hover:bg-indigo/5 disabled:opacity-50"
+                >
+                  {summarizing ? "Summarizing…" : "Summarize what I know about this"}
+                </button>
+                {summaryError && <p className="mt-2 text-xs text-rose-700">{summaryError}</p>}
+                {summary && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">{summary}</p>}
+              </div>
 
               {detail.concept.possibleDuplicateOfConceptId && (
                 <div className="mt-4 rounded-lg border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber-700">

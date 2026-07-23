@@ -5,7 +5,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import CitationPill from "@/components/CitationPill";
 import SourceViewerModal from "@/components/SourceViewerModal";
-import { api, ApiError, CitationOut, Provenance } from "@/lib/api";
+import { api, ApiError, CitationOut, Provenance, SearchResultOut } from "@/lib/api";
 
 interface ChatMessage {
   id: string;
@@ -60,6 +60,13 @@ export default function ChatPage() {
   const [readyCount, setReadyCount] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  // Milestone 9 (Intent Workflows): the one new UI affordance this
+  // milestone adds to the chat compose bar, per the approved design's
+  // "Explain (default) / Search" toggle (docs/milestones/MILESTONE_9.md
+  // Section 3.7) -- Compare/Summarize get their own entry points
+  // elsewhere (concepts list, resource/concept detail pages) rather than
+  // living in this same freeform-question box.
+  const [mode, setMode] = useState<"EXPLAIN" | "SEARCH">("EXPLAIN");
   const [phase, setPhase] = useState<"idle" | "searching" | "generating">("idle");
   const [error, setError] = useState<string | null>(null);
   const [activeCitation, setActiveCitation] = useState<CitationOut | null>(null);
@@ -93,21 +100,44 @@ export default function ChatPage() {
     setTimeout(() => setPhase((p) => (p === "searching" ? "generating" : p)), 500);
 
     try {
-      const res = await api.sendMessage(conversationId, content, useExternalFallback);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: res.answer.id,
-          role: "assistant",
-          content: res.answer.content,
-          status: res.answer.status,
-          provenance: res.answer.provenance,
-          retrievalConfidence: res.answer.retrievalConfidence,
-          canOfferExternalFallback: res.answer.canOfferExternalFallback,
-          citations: res.answer.citations,
-          sourceQuestion: content,
-        },
-      ]);
+      if (mode === "SEARCH" && !useExternalFallback) {
+        const res = await api.sendIntent(conversationId, { intent: "SEARCH", question: content });
+        const searchResult = res.result as SearchResultOut;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `search-${Date.now()}`,
+            role: "assistant",
+            content:
+              searchResult.assistedSynthesis ??
+              (searchResult.hits.length > 0
+                ? `Found ${searchResult.hits.length} matching result${searchResult.hits.length === 1 ? "" : "s"}.`
+                : "No matches found in your workspace."),
+            status: res.status,
+            provenance: res.provenance,
+            retrievalConfidence: res.retrievalConfidence,
+            canOfferExternalFallback: false,
+            citations: searchResult.hits,
+            sourceQuestion: content,
+          },
+        ]);
+      } else {
+        const res = await api.sendMessage(conversationId, content, useExternalFallback);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: res.answer.id,
+            role: "assistant",
+            content: res.answer.content,
+            status: res.answer.status,
+            provenance: res.answer.provenance,
+            retrievalConfidence: res.answer.retrievalConfidence,
+            canOfferExternalFallback: res.answer.canOfferExternalFallback,
+            citations: res.answer.citations,
+            sourceQuestion: content,
+          },
+        ]);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong while generating the answer.");
     } finally {
@@ -213,21 +243,37 @@ export default function ChatPage() {
             }}
             className="border-t border-edge bg-surface px-8 py-4"
           >
-            <div className="mx-auto flex max-w-2xl items-center gap-2">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask a question about your documents…"
-                maxLength={2000}
-                className="flex-1 rounded-lg border border-edge px-3 py-2.5 text-sm focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-              />
-              <button
-                type="submit"
-                disabled={phase !== "idle" || !input.trim()}
-                className="rounded-lg bg-indigo px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo/90 disabled:opacity-50"
-              >
-                Send
-              </button>
+            <div className="mx-auto max-w-2xl">
+              <div className="mb-2 flex gap-1">
+                {(["EXPLAIN", "SEARCH"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      mode === m ? "border-indigo bg-indigo/10 text-indigo" : "border-edge text-slate-500 hover:text-ink"
+                    }`}
+                  >
+                    {m === "EXPLAIN" ? "Explain" : "Search"}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={mode === "EXPLAIN" ? "Ask a question about your documents…" : "Search your documents…"}
+                  maxLength={2000}
+                  className="flex-1 rounded-lg border border-edge px-3 py-2.5 text-sm focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+                />
+                <button
+                  type="submit"
+                  disabled={phase !== "idle" || !input.trim()}
+                  className="rounded-lg bg-indigo px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo/90 disabled:opacity-50"
+                >
+                  {mode === "EXPLAIN" ? "Send" : "Search"}
+                </button>
+              </div>
             </div>
           </form>
         )}

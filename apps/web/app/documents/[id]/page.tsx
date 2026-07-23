@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import CategoryBadge from "@/components/CategoryBadge";
-import { api, ApiError, ConceptLinkOut, ContentCategory, DocumentOut, IngestionJobOut } from "@/lib/api";
+import CitationPill from "@/components/CitationPill";
+import SourceViewerModal from "@/components/SourceViewerModal";
+import { api, ApiError, CitationOut, ConceptLinkOut, ContentCategory, DocumentOut, IngestionJobOut, SummarizeResultOut } from "@/lib/api";
 
 const STEPS = [
   { key: "UPLOADED", label: "Uploaded" },
@@ -44,6 +46,13 @@ export default function DocumentDetailPage() {
   const [subjectDraft, setSubjectDraft] = useState<string>("");
   const [savingClassification, setSavingClassification] = useState(false);
   const [classificationError, setClassificationError] = useState<string | null>(null);
+  // Milestone 9 (Intent Workflows): the Summarize entry point this page
+  // adds, per the approved design (docs/milestones/MILESTONE_9.md Section
+  // 3.7) -- a self-contained panel, not a redesign of this page.
+  const [summarizing, setSummarizing] = useState(false);
+  const [summary, setSummary] = useState<{ content: string; citations: CitationOut[] } | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [activeCitation, setActiveCitation] = useState<CitationOut | null>(null);
 
   const load = async () => {
     try {
@@ -83,6 +92,25 @@ export default function DocumentDetailPage() {
     setSubjectDraft(document?.subject || "");
     setClassificationError(null);
     setEditingClassification(true);
+  };
+
+  const onSummarize = async () => {
+    setSummarizing(true);
+    setSummaryError(null);
+    try {
+      const conv = await api.createConversation();
+      const res = await api.sendIntent(conv.id, { intent: "SUMMARIZE", resourceId: params.id });
+      if (res.status !== "OK") {
+        setSummaryError("Couldn't find enough evidence to summarize this document.");
+        return;
+      }
+      const result = res.result as SummarizeResultOut;
+      setSummary({ content: result.content, citations: res.citations });
+    } catch (err) {
+      setSummaryError(err instanceof ApiError ? err.message : "Couldn't summarize this document.");
+    } finally {
+      setSummarizing(false);
+    }
   };
 
   const onSaveClassification = async () => {
@@ -244,6 +272,37 @@ export default function DocumentDetailPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Milestone 9: Summarize this document -- an on-demand
+                    intent request, not an auto-generated/persisted
+                    synthesis (that's Vision v2's Phase 2 concept-
+                    synthesis feature, explicitly out of this milestone's
+                    scope). */}
+                <div className="rounded-lg border border-edge bg-surface px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Summary</p>
+                    <button
+                      onClick={onSummarize}
+                      disabled={summarizing}
+                      className="rounded-lg border border-indigo px-3 py-1.5 text-xs font-medium text-indigo hover:bg-indigo/5 disabled:opacity-50"
+                    >
+                      {summarizing ? "Summarizing…" : "Summarize this document"}
+                    </button>
+                  </div>
+                  {summaryError && <p className="mt-2 text-xs text-rose-700">{summaryError}</p>}
+                  {summary && (
+                    <div className="mt-3">
+                      <p className="whitespace-pre-wrap text-sm text-slate-700">{summary.content}</p>
+                      {summary.citations.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-edge pt-3">
+                          {summary.citations.map((c) => (
+                            <CitationPill key={c.order} citation={c} onOpen={setActiveCitation} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="mt-6">
@@ -276,6 +335,7 @@ export default function DocumentDetailPage() {
           </div>
         )}
       </div>
+      {activeCitation && <SourceViewerModal citation={activeCitation} onClose={() => setActiveCitation(null)} />}
     </AppShell>
   );
 }

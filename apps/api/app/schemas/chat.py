@@ -15,9 +15,19 @@ class CreateMessageRequest(BaseModel):
 class CitationOut(BaseModel):
     documentId: str
     documentFilename: str
+    # Milestone 9: exposed so a citation can be persisted end-to-end from
+    # a generic IntentResponse (see app/schemas/intents.py) without a
+    # second, richer citation type -- previously only used internally via
+    # retrieval_service.CitationResult.
+    chunkId: str
     pageNumber: int
     excerpt: str
     order: int
+    # Milestone 9: which Compare target this citation supports (e.g.
+    # "Resource A", a concept's name). None for Explain/Search/resource-
+    # or concept-targeted Summarize, where a citation belongs to the
+    # answer as a whole rather than to one side of a comparison.
+    targetLabel: str | None = None
 
 
 class MessageOut(BaseModel):

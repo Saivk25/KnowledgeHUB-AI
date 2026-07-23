@@ -26,6 +26,7 @@ is never ambiguous from a directory listing alone.
 | `models/conversation.py`, `models/answer.py`, `models/citation.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
 | `services/embeddings.py` (`embed_one` on a query), `services/vector_repo.py` (`search`), `services/llm.py`, `services/retrieval_service.py`, `services/sufficiency.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
 | `schemas/chat.py`, `api/v1/routes/chat.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
+| `schemas/intents.py`, `services/intents/` (`base.py`, `explain.py`, `search.py`, `summarize.py`, `compare.py`, `registry.py`) | 9 -- Intent Workflows | **Yes** |
 | `api/v1/router.py` | 2/3/7/8 (all aggregated here) | **Yes** -- imports `auth`, `workspace`, `documents`, `concepts`, and (as of Milestone 8) `chat` |
 
 Note on `services/embeddings.py` and `services/vector_repo.py`: both files
@@ -198,3 +199,39 @@ verdict/score/confidence. `services/llm.py` gained
 See `docs/adr/0015-retrieval-provenance.md` for the full design,
 including the vector-hit ↔ concept-expansion chunk-identity
 reconciliation this milestone's hybrid merge depends on.
+
+## Milestone 9 note (Intent Workflows, per the roadmap's own numbering)
+
+New package `services/intents/` -- one `IntentHandler` per intent
+(`ExplainIntent`, `SearchIntent`, `SummarizeIntent`, `CompareIntent`),
+registered in `registry.py`, mirroring the `Extractor`/`Classifier`/
+`ConceptLinker` plugin-registry pattern rather than a single function
+branching on intent type (amended into the design specifically so
+Milestone 10's five additional intents stay additive). `schemas/intents.py`
+defines the DRR Section 4 shared envelope (`IntentRequest`/
+`IntentResponse`, `result` a discriminated union per intent).
+
+`services/retrieval_service.py` gained five new functions
+(`resolve_question_candidates`, `resolve_citations_and_evidence`,
+`resolve_freeform_evidence`, `resolve_resource_evidence`,
+`resolve_concept_evidence`) -- shared retrieval primitives every intent
+calls; `answer_question()` itself is unchanged in behavior, now just
+calling `resolve_question_candidates()` instead of duplicating that
+logic inline. `services/llm.py` gained `summarize()`/`compare()` on
+`LLMProvider`, same real-vs-honest-fallback pattern as
+`answer_general_knowledge()`.
+
+New route `POST /conversations/{id}/intents` (`api/v1/routes/chat.py`) is
+the one real dispatch entry point for all four intents.
+`POST /conversations/{id}/messages` (Milestone 8) is kept, unchanged, as
+a separate full-fidelity EXPLAIN-only path -- both call the identical
+`retrieval_service.answer_question()`, so there is exactly one
+implementation of the retrieval logic; see `create_intent()`'s docstring
+for why this is a refinement of the "thin wrapper" design, not a
+deviation from it. `models/answer.py` gained `intent`/`intent_payload`;
+`models/citation.py` gained `target_label`; `schemas/chat.py`'s
+`CitationOut` gained `chunkId`/`targetLabel` (migration
+`0007_intent_workflows`). See `docs/adr/0016-intent-workflows.md` and
+`docs/milestones/MILESTONE_9.md` for the full design, including the three
+approved trade-offs (Compare's partial-evidence handling, provenance's
+unchanged 3-value contract, and Search's confidence-triggered LLM call).
