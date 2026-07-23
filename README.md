@@ -2,12 +2,31 @@
 
 **Your Organization's Intelligence, Instantly Searchable.**
 
+[![CI](https://github.com/Saivk25/KnowledgeHUB-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Saivk25/KnowledgeHUB-AI/actions/workflows/ci.yml)
+[![Latest tag](https://img.shields.io/github/v/tag/Saivk25/KnowledgeHUB-AI?label=latest%20milestone)](https://github.com/Saivk25/KnowledgeHUB-AI/tags)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](apps/api/requirements.txt)
+[![Next.js](https://img.shields.io/badge/frontend-Next.js-black.svg)](apps/web/package.json)
+
 > **Status: Milestone 8 of 12 -- Local-First Retrieval & Provenance --
 > frozen and tagged `v0.8.0-local-first-retrieval`.** Milestones 1-8 are
 > implemented, verified, and frozen. This README has two parts: **Part 1**
 > describes the finished product this project is building toward; **Part
-> 2** describes exactly what exists in this repository right now. See
-> [Roadmap](#roadmap) for everything still ahead.
+> 2** describes exactly what exists in this repository right now.
+
+## Contents
+
+- [Part 1 -- The Vision](#part-1----the-vision-what-this-becomes-when-complete)
+- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-8)
+- [Screenshots](#screenshots)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [Testing](#testing)
+- [Repository Layout](#repository-layout)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -164,11 +183,62 @@ list behind every tag above.
   under real load, embedding-version migration tooling, full seed data,
   demo script (M12).
 
-## Running it locally
+---
+
+## Screenshots
+
+Not yet checked in -- see
+[`docs/assets/screenshots/README.md`](docs/assets/screenshots/README.md)
+for exactly which screens to capture and the expected file names. Once
+added, they'll be embedded here:
+
+<!--
+![Documents library](docs/assets/screenshots/documents-library.png)
+![Concept graph](docs/assets/screenshots/concept-graph.png)
+![Chat with provenance](docs/assets/screenshots/chat-provenance.png)
+-->
+
+## Tech Stack
+
+| Layer | Technology | Why (see ADR) |
+|---|---|---|
+| Frontend | Next.js (App Router), TypeScript, Tailwind | |
+| Backend | FastAPI, SQLAlchemy 2.0, Pydantic v2 | |
+| Database | PostgreSQL (SQLite fallback for zero-config local dev) | |
+| Vector store | Qdrant (in-memory fallback if unreachable) | [ADR-0002](docs/adr/0002-qdrant-vector-db.md) |
+| Migrations | Alembic | [ADR-0010](docs/adr/0010-alembic-migrations.md) |
+| Embeddings | Local hash (zero-config) or OpenAI (opt-in) | [ADR-0004](docs/adr/0004-ai-provider-strategy.md) |
+| LLM | Extractive fallback (zero-config) or OpenAI (opt-in) | [ADR-0004](docs/adr/0004-ai-provider-strategy.md) |
+| Ingestion | FastAPI `BackgroundTask` | [ADR-0005](docs/adr/0005-ingestion-background-task.md) |
+| Storage | Local disk, Docker-volume-backed | [ADR-0007](docs/adr/0007-local-storage-adapter.md) |
+| Infra | Docker Compose | [ADR-0009](docs/adr/0009-docker-compose-not-kubernetes.md) |
+| CI | GitHub Actions (lint, format, tests, frontend build) | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Browser] --> WEB[Next.js Web App]
+    WEB --> API[FastAPI]
+    API --> PG[(PostgreSQL)]
+    API --> STORE[(Local Storage Volume)]
+    API --> QD[(Qdrant)]
+    API --> LLM["LLM Provider\nOpenAI or Extractive Fallback"]
+    API --> EMB["Embedding Provider\nLocal Hash or OpenAI"]
+```
+
+Full ingestion-flow and retrieval/provenance-flow diagrams, plus the
+reasoning behind each architectural choice, live in
+[`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md).
+Individual decisions are recorded as ADRs in [`docs/adr/`](docs/adr/)
+(15 so far, one per significant decision).
+
+## Quickstart
 
 ### Docker Compose (recommended)
 
 ```bash
+git clone https://github.com/Saivk25/KnowledgeHUB-AI.git knowledgehub-ai
 cd knowledgehub-ai
 docker compose up --build
 ```
@@ -179,7 +249,9 @@ docker compose up --build
 - Liveness: http://localhost:8000/health
 - Readiness: http://localhost:8000/health/ready
 
-No `.env` file is required to run the Docker Compose stack locally.
+No `.env` file is required to run the Docker Compose stack locally --
+everything defaults to zero-config local providers (SQLite/in-memory
+vector store fallback, local hash embeddings, extractive LLM fallback).
 
 ### Running services individually
 
@@ -202,6 +274,10 @@ npm install
 npm run dev
 ```
 
+Want to try it with real content instead of your own uploads? See
+[`demo-data/`](demo-data/) for ready-made sample files across every
+supported format.
+
 ## Testing
 
 ```bash
@@ -218,6 +294,9 @@ npm install
 npx tsc --noEmit
 npm run build
 ```
+
+CI (`.github/workflows/ci.yml`) runs all of the above on every push and
+pull request.
 
 ## Repository layout
 
@@ -254,9 +333,13 @@ knowledgehub-ai/
 ├── docs/
 │   ├── adr/                # architecture decision records, 0001-0015
 │   ├── milestones/          # per-milestone design/implementation/verification
-│   └── architecture/
+│   ├── architecture/        # system architecture + diagrams
+│   └── assets/screenshots/  # README screenshots (see its own README)
 ├── demo-data/                # sample source files across supported formats
 ├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── CODE_OF_CONDUCT.md
 ├── docker-compose.yml
 └── .github/workflows/ci.yml
 ```
@@ -282,6 +365,16 @@ Detailed architecture decisions for the whole system live in
 [`docs/adr/`](docs/adr/); per-milestone design, implementation, and
 verification records live in
 [`docs/milestones/`](docs/milestones/).
+
+## Contributing
+
+Contributions are welcome -- see [`CONTRIBUTING.md`](CONTRIBUTING.md) for
+the development workflow, coding conventions, and why frozen milestones
+aren't modified retroactively. Please also review the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+Found a security issue? Please follow [`SECURITY.md`](SECURITY.md)
+rather than opening a public issue.
 
 ## License
 
