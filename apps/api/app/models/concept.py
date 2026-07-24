@@ -42,12 +42,32 @@ Three tables, purely additive -- no existing table's columns change:
    the same principle that keeps LocalHeuristicClassifier from guessing a
    subject in Milestone 6.
 
-Uniqueness (no two ACTIVE concepts sharing a normalized name in one
-workspace; no duplicate evidence/relationship rows) is enforced at the
-application layer in concept_graph.py, not via a DB UNIQUE constraint --
-matching this codebase's existing convention (see resource.py's own
-docstring: cross-field invariants live in Python, not SQL; `checksum` is
-indexed but not DB-unique either, for the same reason).
+Uniqueness: no duplicate evidence/relationship rows is still enforced at
+the application layer only (concept_graph.py), matching this codebase's
+existing convention (see resource.py's own docstring: cross-field
+invariants live in Python, not SQL; `checksum` is indexed but not
+DB-unique either, for the same reason).
+
+No two ACTIVE concepts sharing a normalized name in one workspace is
+*additionally* backed by a database constraint as of Milestone 12
+(migration 0010_concept_dedup_unique_index): a partial unique index on
+`(workspace_id, normalized_name)` `WHERE status = 'ACTIVE'`. This is a
+deliberate exception to the "no DB UNIQUE constraint" convention stated
+above, not a silent reversal of it -- concept_graph.py's `resolve_concept()`
+originally relied purely on an application-layer SELECT-then-INSERT
+check, which is race-free under any single request but is not atomic
+across two concurrent requests. Concurrent `BackgroundTask` ingestion
+runs resolving the same concept name (first actually exercised by
+Milestone 12's multi-format seed data, see
+docs/milestones/MILESTONE_12.md Section 12) could both pass the SELECT
+before either committed, producing two ACTIVE concepts with the same
+name -- exactly the kind of invariant a database constraint, not more
+Python, is required to close. The index only ever rejects a second
+concurrent ACTIVE insert; `resolve_concept()` catches that as an
+`IntegrityError` and transparently joins the winner's row instead of
+failing. MERGED/UNUSED rows are unaffected and may freely share a
+normalized_name with each other or with the current ACTIVE row, matching
+`resolve_concept()`'s own `status == ACTIVE` filter.
 
 Concept status lifecycle: `ACTIVE` (normal) -> `MERGED` (folded into
 another concept via POST /concepts/{id}/merge; the row is preserved, not

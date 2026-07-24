@@ -17,6 +17,14 @@ one API replica, concurrent `create_all`-style calls were harmless
 top-level `alembic upgrade head` is guarded by Alembic's own lock table
 (alembic_version) but is still meant to be run once, out of band, not
 racing N app instances on every restart.
+
+Milestone 12 addition: a startup event reconciles stale IngestionJob rows
+(see app/services/job_reconciliation.py and MILESTONE_12.md Section 4.1)
+-- unlike the Alembic migration above, this is safe to run on every boot
+of every replica: it is a single bounded, indexed query, not a schema
+change, and marking an already-orphaned job FAILED twice is a no-op the
+second time (the query only ever matches rows still `status ==
+"RUNNING"`).
 """
 
 from __future__ import annotations
@@ -109,3 +117,26 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 app.include_router(health_router)
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+def _reconcile_stale_jobs_on_startup() -> None:
+    """Milestone 12, Section 4.1: mark any IngestionJob left `RUNNING` by a
+    crashed prior process as FAILED/INTERRUPTED, so it becomes resumable
+    via the existing retry/reextract endpoints instead of stuck forever.
+    Wrapped defensively -- a reconciliation failure must never prevent the
+    API from starting, the same "auxiliary work never blocks the primary
+    path" rule already applied to classification/concept-linking failures
+    in app/services/ingestion_service.py."""
+    from app.db.session import SessionLocal
+    from app.services.job_reconciliation import reconcile_stale_jobs
+
+    db = SessionLocal()
+    try:
+        count = reconcile_stale_jobs(db)
+        if count:
+            logger.warning("startup_reconciliation reconciled=%s", count)
+    except Exception:  # noqa: BLE001
+        logger.exception("startup_reconciliation_failed")
+    finally:
+        db.close()

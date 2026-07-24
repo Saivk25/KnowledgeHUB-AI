@@ -166,6 +166,16 @@ class Settings(BaseSettings):
     # docs/milestones/MILESTONE_11.md Section 4.7 (Design Decision 1).
     LOW_CONFIDENCE_THRESHOLD: float = 0.5
 
+    # -- Milestone 12 (Production Hardening & Portfolio Polish) --
+    # Section 4.1 (BackgroundTask retained; ADR-0005 reconfirmed): a
+    # RUNNING IngestionJob older than this is treated as orphaned by a
+    # crashed process, not still legitimately in progress. Generous
+    # default -- ingestion is normally seconds, not hours; a false
+    # positive here is a minor inconvenience (one extra retry click), a
+    # false negative just means waiting one more reconciliation pass, so
+    # the threshold errs high. See app/services/job_reconciliation.py.
+    STALE_JOB_THRESHOLD_MINUTES: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

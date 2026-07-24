@@ -5,6 +5,119 @@ frozen milestone. Each entry links to that milestone's full design/
 implementation/verification record under `docs/milestones/`; this file is
 a summary index, not a replacement for those documents.
 
+## [v0.12.0] -- Production Hardening & Portfolio Polish
+
+See `docs/milestones/MILESTONE_12.md` for the full implementation and
+verification record, and `docs/adr/0019-production-hardening.md` for the
+design decisions summarized below. A hardening pass over Milestones
+1-11, not a feature milestone -- concludes the original 12-milestone
+roadmap as tabled.
+
+### Added
+- `app/services/job_reconciliation.py` (`reconcile_stale_jobs`) -- a
+  startup-time, bounded/indexed check that marks any `IngestionJob` left
+  `RUNNING` by a crashed prior process as `FAILED`/`INTERRUPTED`, so it
+  becomes resumable via the existing retry/reextract endpoints instead of
+  stuck forever. Wired into `app/main.py`'s startup event, wrapped
+  defensively so a reconciliation failure never blocks API startup. New
+  `STALE_JOB_THRESHOLD_MINUTES` config setting.
+- `embedding_model_version` on `VectorPoint` (`app/services/vector_repo.py`)
+  and a `version` string on every `EmbeddingProvider`
+  (`app/services/embeddings.py`: `"local-hash-v1"` /
+  `"openai:<model>"`) -- every vector point written from this milestone
+  forward (both Qdrant collections) carries which provider produced it.
+  A payload index on the new field is created for both newly-created and
+  already-existing collections.
+- `app/services/reembed.py` -- a batched, resumable re-embed procedure
+  that migrates a workspace's mismatched-version points to the currently
+  configured provider, reusing the existing `VectorRepository`
+  upsert/delete write path rather than a new one.
+- `demo-data/` extended with one fixture per remaining supported source
+  type (`data_retention_policy.{docx,pptx,md,py,png}`,
+  `YOUTUBE_REFERENCE.md`) and `demo-data/seed.py`, a documented seeding
+  script that ingests every fixture through the real
+  `POST /api/v1/documents` upload path.
+- Alembic migration `0010_concept_dedup_unique_index` -- a partial unique
+  index on `concepts(workspace_id, normalized_name)` `WHERE status =
+  'ACTIVE'`, backing an invariant that was previously enforced only at
+  the application layer.
+- `WorkspaceStatsOut` schema (`app/schemas/auth.py`) and a
+  `_workspace_stats()` helper (`app/api/v1/routes/workspace.py`) --
+  `GET /workspace` now returns per-status `Resource` counts
+  (`readyDocuments`/`processingDocuments`/`failedDocuments`), reusing the
+  same counting pattern `chat.py`'s message-send route already used.
+- `docs/DEMO_SCRIPT.md` -- a guided, ~10-15 minute walkthrough of the
+  seeded workspace, verified live against a real deployment.
+- `docs/assets/screenshots/{documents-library,concept-graph,
+  chat-provenance,upload-flow}.png` -- captured from the real, seeded,
+  running application and wired into `README.md`.
+- 5 new backend test modules: `test_job_reconciliation.py`,
+  `test_embedding_versioning.py`, `test_seed_data_cross_format_concept.py`,
+  `test_concept_resolution_concurrency.py`, `test_workspace_stats.py`.
+
+### Fixed (discovered during live verification, not TestClient-only testing)
+- **Concept-resolution concurrency race:** `resolve_concept()`'s
+  exact-match-then-insert check was not atomic across concurrent
+  `BackgroundTask` ingestion runs -- two overlapping uploads resolving
+  the same concept name could both pass the check before either
+  committed, producing duplicate `ACTIVE` concepts. Closed by migration
+  `0010` plus an `IntegrityError`-recovery path in `resolve_concept()`
+  (scoped to its own `SAVEPOINT` via `db.begin_nested()`), which
+  transparently joins the winning row instead of failing. Existing
+  application-layer duplicate-evidence/relationship checks are
+  unaffected. See `docs/milestones/MILESTONE_12.md` Section 12.
+- **Workspace stats missing, hiding the chat UI:** `GET /workspace` never
+  returned the `stats` field `apps/web/app/chat/page.tsx` has read since
+  Milestone 4 (`ws.stats?.readyDocuments`) -- a silent regression from
+  Milestone 8 promoting that screen from dormant to live without also
+  building the backend field it depends on. `readyDocuments` was always
+  `0`, permanently hiding the chat compose UI for every workspace. Fixed
+  by populating `stats` in the existing `GET /workspace` response; no new
+  endpoint, no frontend behavior change beyond unblocking the UI the
+  contract already promised. See `docs/milestones/MILESTONE_12.md`
+  Section 13.
+
+### Changed
+- `app/models/concept.py`'s docstring updated to reflect the partial
+  unique index as a deliberate, documented exception to this codebase's
+  "no DB UNIQUE constraint for cross-field invariants" convention.
+- `apps/api/app/api/v1/routes/workspace.py`'s module docstring and
+  `apps/web/lib/api.ts`'s `WorkspaceStatsOut`/`getWorkspace()` comments
+  corrected to stop describing a state (unpopulated `stats`, a dormant
+  chat screen) that stopped being true since Milestone 8.
+
+### Operational notes
+- Applying migration `0010` to a deployment that already contains
+  duplicate `ACTIVE` concepts fails at `alembic upgrade head` (the
+  partial unique index's `CREATE INDEX` is rejected by pre-existing
+  duplicate data), and this project's single-container deployment model
+  means the API -- including the merge endpoint that would otherwise
+  clean up those duplicates -- is unreachable until the same migration
+  succeeds. Any deployment carrying real, pre-existing duplicate `ACTIVE`
+  concepts needs them resolved by a one-off maintenance step *before* the
+  new image is deployed. See `docs/milestones/MILESTONE_12.md` Section
+  12.1.
+
+### Testing
+- Full suite: 228 passed, 0 failed, 0 skipped (36 test files). Both
+  amendment regression tests independently confirmed to fail against
+  their respective pre-fix code and pass against the fix.
+- Ruff (`ruff check app tests`) and Black (`black --check app tests`)
+  clean; `tsc --noEmit` clean.
+- Live-verified against a freshly rebuilt `docker compose` deployment
+  seeded via `demo-data/seed.py`: single "Data Retention Policy" concept
+  with 5 evidence links; `GET /workspace` returns accurate stats; `/chat`
+  renders the compose UI; Search mode returns a real provenance-badged,
+  cited answer.
+
+### Documentation
+- `docs/milestones/MILESTONE_12.md` updated to "Implemented and
+  Verified" with the full verification record (Section 14).
+- `docs/adr/0019-production-hardening.md` added, covering the
+  BackgroundTask re-evaluation, embedding-version tag format, the
+  concept-resolution concurrency fix, the workspace-stats fix, and the
+  migration-order operational note.
+
 ## [v0.11.0] -- Confidence & Correction UX
 
 See `docs/milestones/MILESTONE_11.md` for the full implementation and

@@ -22,6 +22,14 @@ as the zero-config default: a ~400MB first-time model download is a poor
 experience for a 2-day portfolio MVP and risks failing in offline/CI
 environments. It remains the natural Phase 2 upgrade for local-only
 deployments that still want better-than-lexical quality without an API key.
+
+Milestone 12 addition (Section 4.2): each provider now exposes a
+`version` string, stored on every vector point it produces
+(VectorPoint.embedding_model_version, see app/services/vector_repo.py)
+so a later provider/model change is detectable instead of silently
+mixing two incompatible embedding spaces in the same Qdrant collection.
+Purely descriptive metadata -- computing or storing it changes nothing
+about how a vector itself is produced.
 """
 
 from __future__ import annotations
@@ -57,6 +65,11 @@ _STOPWORDS = frozenset(
 
 class EmbeddingProvider(ABC):
     dimension: int
+    # Milestone 12: identifies which model/algorithm produced a vector.
+    # Every concrete subclass must set this (a class attribute is enough
+    # when the value never varies at runtime; OpenAIEmbeddingProvider sets
+    # it in __init__ instead, since it depends on a config value).
+    version: str
 
     @abstractmethod
     def embed(self, texts: list[str]) -> list[list[float]]: ...
@@ -66,6 +79,12 @@ class EmbeddingProvider(ABC):
 
 
 class LocalHashEmbeddingProvider(EmbeddingProvider):
+    # "v1" of this specific hashing scheme (token set, stopword list,
+    # unsigned feature hashing below) -- bump this if the algorithm itself
+    # ever changes in a way that would produce a different vector for the
+    # same text, so existing points become detectably stale.
+    version = "local-hash-v1"
+
     def __init__(self, dimension: int | None = None):
         self.dimension = dimension or settings.EMBEDDING_DIMENSION
 
@@ -91,6 +110,11 @@ class LocalHashEmbeddingProvider(EmbeddingProvider):
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, dimension: int = 1536):
         self.dimension = dimension
+        # Depends on a config value (which model is configured), unlike
+        # LocalHashEmbeddingProvider's fixed algorithm -- set per-instance,
+        # not as a class attribute, so a config change is reflected the
+        # next time the provider cache is reset (reset_embedding_provider_cache()).
+        self.version = f"openai:{settings.OPENAI_EMBEDDING_MODEL}"
         self._client = httpx.Client(
             base_url=settings.OPENAI_BASE_URL,
             headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},

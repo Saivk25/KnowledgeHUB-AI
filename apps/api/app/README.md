@@ -28,6 +28,9 @@ is never ambiguous from a directory listing alone.
 | `schemas/chat.py`, `api/v1/routes/chat.py` | 8 -- Local-First Retrieval & Provenance | **Yes** |
 | `schemas/intents.py`, `services/intents/` (`base.py`, `explain.py`, `search.py`, `summarize.py`, `compare.py`, `registry.py`) | 9 -- Intent Workflows | **Yes** |
 | `models/study.py` (`QuizAttempt`, `VivaSession`), `services/study_signals.py`, `services/intents/` (`quiz.py`, `flashcards.py`, `viva.py`, `revision.py`, `study_planner.py`) | 10 -- Study Workflows | **Yes** |
+| `models/correction.py` (`ResourceCorrection`, `CorrectionField`) | 11 -- Confidence & Correction UX | **Yes** |
+| `services/job_reconciliation.py` | 12 -- Production Hardening & Portfolio Polish | **Yes** -- called from `main.py`'s startup event |
+| `services/reembed.py` | 12 -- Production Hardening & Portfolio Polish | Standalone tooling, not mounted as a route (script/procedure, per Section 4.2's design) |
 | `api/v1/router.py` | 2/3/7/8 (all aggregated here) | **Yes** -- imports `auth`, `workspace`, `documents`, `concepts`, and (as of Milestone 8) `chat` |
 
 Note on `services/embeddings.py` and `services/vector_repo.py`: both files
@@ -41,14 +44,18 @@ in any Milestone 8 behavior -- the split was already at the function
 level before Milestone 8 started, not something that milestone had to
 introduce.
 
-Note on `workspace.py`: `GET /workspace` still does not return a `stats`
-field (document ready/processing/failed counts). The `Document` model now
-exists (as of this milestone), so the `OperationalError` that blocked this
-in Milestone 2 no longer applies -- it remains unimplemented because no
-consumer needs a server-computed aggregate yet: the Documents page calls
-`GET /documents` and computes its own counts client-side. Add a real
-`stats` field to this endpoint only when a future milestone actually needs
-it computed server-side.
+Note on `workspace.py`: as of Milestone 12 (Section 13 addendum),
+`GET /workspace` now returns a `stats` field (per-status `Resource`
+counts: `readyDocuments`/`processingDocuments`/`failedDocuments`) --
+see `_workspace_stats()` in `api/v1/routes/workspace.py` and
+`schemas/auth.py`'s `WorkspaceStatsOut`. This was left unimplemented from
+Milestone 2 through Milestone 11 because no consumer was known to need a
+server-computed aggregate (the Documents page calls `GET /documents` and
+computes its own counts client-side); Milestone 12 discovered live that
+`apps/web/app/chat/page.tsx` had actually depended on this field since
+Milestone 4 and silently broke when that screen went live in Milestone 8
+-- see `docs/milestones/MILESTONE_12.md` Section 13 for the full
+discovery.
 
 ## Milestone 6 note (Metadata, Classification & Confidence)
 
@@ -288,3 +295,72 @@ this milestone made, and explicitly approved as scoped/cosmetic-only
 `ConceptRelationship`/`Answer`/`Citation`. See
 `docs/adr/0017-study-workflows.md` and `docs/milestones/MILESTONE_10.md`
 for the full design, including all five approved decisions.
+
+## Milestone 11 note (Confidence & Correction UX, per the roadmap's own numbering)
+
+One new table (migration `0009_confidence_correction_ux`, model in
+`models/correction.py`): `ResourceCorrection` (`CorrectionField` enum:
+`CONTENT_CATEGORY`/`SUBJECT`) -- logs one row per classification field
+changed via the existing `PATCH /documents/{id}/classification` route,
+capturing the prior value/confidence immediately before it's
+overwritten. New read-only route `GET /documents/{id}/corrections`
+(`api/v1/routes/documents.py`) surfaces this history newest-first; the
+route itself is additive, `PATCH .../classification`'s own
+request/response shape is unchanged.
+
+New route `POST /documents/{id}/reextract` re-runs the identical
+ingestion pipeline on an already-`READY` document with low extraction
+confidence; `POST /documents/{id}/retry` (Milestone 3, `FAILED`-only) has
+zero lines changed. `DocumentOut` gained four optional fields exposing
+`Resource.auto_content_category`/`auto_subject` and their confidences
+(written on every classification run since Milestone 6, never returned
+by the API before now). `AnswerOut`/`IntentResponse` each gained
+`sufficiencyReason`, exposing `Answer.sufficiency_reason` (computed by
+the unchanged Milestone 8 sufficiency scorer). New
+`LOW_CONFIDENCE_THRESHOLD` config setting, shared by extraction and
+classification triage. See `docs/adr/0018-confidence-correction-ux.md`
+and `docs/milestones/MILESTONE_11.md` for the full design.
+
+## Milestone 12 note (Production Hardening & Portfolio Polish, per the roadmap's own numbering)
+
+A hardening pass, not a feature milestone -- no new entity, endpoint, or
+capability is introduced anywhere in this milestone; every change below
+either extends an existing response/model additively or corrects a
+previously-incorrect behavior.
+
+New module `services/job_reconciliation.py` (`reconcile_stale_jobs`),
+called from `main.py`'s startup event: marks any `IngestionJob` left
+`RUNNING` by a crashed prior process as `FAILED`/`INTERRUPTED`, resumable
+via the existing retry/reextract endpoints. New
+`STALE_JOB_THRESHOLD_MINUTES` config setting. No change to
+`_run_ingestion`'s stage logic itself.
+
+`services/embeddings.py`'s `EmbeddingProvider`s each gained a `version`
+string (`"local-hash-v1"` / `"openai:<model>"`); `services/vector_repo.py`'s
+`VectorPoint` gained `embedding_model_version`, written on every point in
+both collections (chunk points via `services/ingestion_service.py`,
+concept points via `services/concept_graph.py`). New standalone module
+`services/reembed.py` provides a batched, resumable re-embed procedure --
+not mounted as a route, invoked as tooling.
+
+Alembic migration `0010_concept_dedup_unique_index` adds a partial
+unique index on `concepts(workspace_id, normalized_name) WHERE status =
+'ACTIVE'` -- `services/concept_graph.py`'s `resolve_concept()` now
+catches the resulting `IntegrityError` (scoped to its own `SAVEPOINT` via
+`db.begin_nested()`) and transparently joins the winning row instead of
+failing, closing a concurrency race discovered during real (not
+`TestClient`-only) concurrent ingestion. `models/concept.py`'s docstring
+updated accordingly. See `docs/milestones/MILESTONE_12.md` Section 12.
+
+`schemas/auth.py` gained `WorkspaceStatsOut`;
+`api/v1/routes/workspace.py`'s `get_workspace` now computes and returns
+per-status `Resource` counts via a new `_workspace_stats()` helper,
+reusing `chat.py`'s existing counting pattern -- closing a Milestone
+4-through-8 contract gap that had left the live chat compose UI
+permanently hidden. See `docs/milestones/MILESTONE_12.md` Section 13.
+
+No changes to `Resource`/`Concept`/`ResourceConcept`/
+`ConceptRelationship`/`Answer`/`Citation`/`ResourceCorrection` beyond
+what's described above. See `docs/adr/0019-production-hardening.md` and
+`docs/milestones/MILESTONE_12.md` for the full design, including both
+discovered-in-flight amendments.

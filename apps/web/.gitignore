@@ -1,3 +1,10 @@
 node_modules
 .next
 .env.local
+
+# TypeScript/Next.js build artifacts -- regenerated locally by `next dev`/
+# `next build`/`tsc`, never committed in this repo's history (CI installs
+# fresh via `npm install`, not `npm ci`, so no lockfile is required either).
+next-env.d.ts
+*.tsbuildinfo
+package-lock.json

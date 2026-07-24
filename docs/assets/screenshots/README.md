@@ -1,8 +1,11 @@
 # Screenshots
 
-This folder is where README screenshots live. None are checked in yet --
-add PNGs here and reference them from the root `README.md`'s Screenshots
-section once captured.
+This folder is where README screenshots live. All four are checked in
+(Milestone 12 Item 4), captured from a real `docker compose` deployment
+seeded with Milestone 12 Item 3's multi-format demo data
+(`demo-data/seed.py`), against the actual running application -- not
+mocked or staged. Referenced from the root `README.md`'s Screenshots
+section.
 
 Recommended shots (matches the order screenshots appear in the README):
 

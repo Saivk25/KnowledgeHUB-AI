@@ -32,12 +32,31 @@ Also implements the manual-merge escape hatch (DRR: "a manual-merge
 escape hatch for anything the automated check misses") and the
 orphan-prevention rule from the approved design: a concept is never left
 without at least one evidence link -- see `recompute_concept_usage`.
+
+Milestone 12 update: `resolve_concept`'s new-concept VectorPoint now
+carries `embedding_model_version` (see app/services/embeddings.py and
+app/services/vector_repo.py) -- the same tagging chunk points get in
+app/services/ingestion_service.py, purely descriptive.
+
+Milestone 12 Section 12 addendum: `resolve_concept`'s exact-match
+create-if-absent branch is now race-safe under concurrent ingestion.
+Discovered when real, concurrently-processed `BackgroundTask` ingestion
+runs (not the serial execution every test and every prior milestone's
+usage exercised) produced multiple ACTIVE concepts sharing one
+normalized_name. Backed by migration 0010's partial unique index on
+`concepts(workspace_id, normalized_name) WHERE status = 'ACTIVE'`; a
+losing insert's `IntegrityError` is caught and resolved by re-querying
+for the winner's row, scoped to its own SAVEPOINT (`db.begin_nested()`)
+so the conflict never disturbs other uncommitted work in the caller's
+transaction. See docs/milestones/MILESTONE_12.md Section 12 for the full
+discovery and rationale.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -120,8 +139,43 @@ def resolve_concept(
         status=ConceptStatus.ACTIVE,
         possible_duplicate_of_concept_id=possible_duplicate_of,
     )
-    db.add(concept)
-    db.flush()  # need concept.id before indexing its vector
+    try:
+        # Milestone 12 (Section 12 addendum): the exact-match SELECT above
+        # and this INSERT are not atomic -- two concurrent ingestion
+        # BackgroundTasks resolving the same normalized_name can both pass
+        # that SELECT before either commits. Migration 0010's partial
+        # unique index (workspace_id, normalized_name) WHERE status =
+        # 'ACTIVE' turns the loser's insert into an IntegrityError instead
+        # of a silent duplicate ACTIVE concept. begin_nested() scopes the
+        # attempt to its own SAVEPOINT so a conflict only unwinds this
+        # insert, not any other uncommitted work earlier in the caller's
+        # transaction (e.g. ingestion_service.py's ResourceConcept delete
+        # immediately before this call).
+        with db.begin_nested():
+            db.add(concept)
+            db.flush()  # need concept.id before indexing its vector
+    except IntegrityError:
+        # We lost the race -- another concurrent call already committed a
+        # concept with this exact normalized_name. Re-query for its
+        # (now-visible) row and join it as evidence, exactly like the
+        # ordinary sequential exact-match case above. No vector upsert
+        # here: the winner's resolve_concept() call already indexed one.
+        winner = (
+            db.query(Concept)
+            .filter(
+                Concept.workspace_id == workspace_id,
+                Concept.normalized_name == normalized,
+                Concept.status == ConceptStatus.ACTIVE,
+            )
+            .first()
+        )
+        if winner is None:
+            # Should not happen (the constraint violation proves a
+            # matching ACTIVE row existed at conflict time) -- re-raise
+            # rather than silently returning nothing, since callers always
+            # expect a concept back when a name was proposed.
+            raise
+        return ConceptResolution(concept=winner, created=False, flagged_possible_duplicate=False)
 
     concept_repo.upsert(
         [
@@ -131,6 +185,10 @@ def resolve_concept(
                 workspace_id=workspace_id,
                 concept_id=concept.id,
                 content=_concept_text(name, description),
+                # Milestone 12 (Section 4.2): same tagging as chunk points
+                # (app/services/ingestion_service.py) -- which provider
+                # produced this concept's vector.
+                embedding_model_version=embedder.version,
             )
         ]
     )

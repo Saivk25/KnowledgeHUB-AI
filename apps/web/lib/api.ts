@@ -85,17 +85,22 @@ export interface WorkspaceOut {
   id: string;
   name: string;
 }
-// Milestone note: `stats` is optional because the backend does not return
-// it -- GET /workspace still only returns { workspace }. It is declared
-// here -- rather than omitted -- only because the dormant Milestone 4
-// chat screen (app/_future/chat/page.tsx) already reads it; making it
-// optional keeps that type-check honest without reactivating or
-// rewriting that screen. (It was going to be Milestone 3's job per the
-// original module map, but the Document model in this milestone tracks
-// per-document status, not workspace-level aggregate counts -- the
-// Documents page instead calls listDocuments() and computes its own
-// counts client-side. Add a real `stats` aggregate to GET /workspace
-// only if a future milestone needs it server-computed.)
+// Milestone 12 (Section 13 addendum) update: `stats` is now populated by
+// the real GET /workspace response -- see
+// apps/api/app/api/v1/routes/workspace.py's `_workspace_stats()`.
+//
+// History, for context: this interface was originally declared back when
+// Milestone 4's chat screen still lived, dormant, at
+// app/_future/chat/page.tsx -- `stats` was typed here only to keep that
+// screen's `ws.stats?.readyDocuments` read type-checking cleanly, since
+// GET /workspace didn't return it yet (Milestone 3 shipped a
+// client-computed, listDocuments()-based count on the Documents page
+// instead). Milestone 8 then promoted that screen to the live
+// app/chat/page.tsx route *without* also wiring up this backend field --
+// a real, unnoticed regression that left the live chat page's compose UI
+// permanently hidden behind a false "0 ready documents" blocker until
+// Milestone 12 caught and fixed it. The field stays optional (`?` on the
+// consuming call below) defensively, not because it's unimplemented.
 export interface WorkspaceStatsOut {
   readyDocuments: number;
   processingDocuments: number;
@@ -445,8 +450,12 @@ export const api = {
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
   me: () => request<{ user: UserOut; workspace: WorkspaceOut | null }>("/api/v1/auth/me"),
 
-  // `stats` is not present on the live response -- see WorkspaceStatsOut's
-  // doc comment above.
+  // `stats` is now populated by GET /workspace (Milestone 12 Section 13 --
+  // see WorkspaceStatsOut's doc comment above and
+  // apps/api/app/api/v1/routes/workspace.py's module docstring for why it
+  // wasn't before). Left optional (`?`) defensively, not because it's
+  // unimplemented -- an older cached response or a future auth failure
+  // path could still omit it.
   getWorkspace: () => request<{ workspace: WorkspaceOut; stats?: WorkspaceStatsOut }>("/api/v1/workspace"),
   updateWorkspace: (name: string) =>
     request<{ workspace: WorkspaceOut }>("/api/v1/workspace", { method: "PATCH", body: JSON.stringify({ name }) }),

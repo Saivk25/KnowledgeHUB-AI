@@ -57,6 +57,11 @@ this resource's existing ResourceConcept rows on every run, so a retry
 never accumulates stale duplicate evidence links; concept relationships
 are deduplicated at write time instead (see `_upsert_relationship`), since
 they are not scoped to one resource_id the way evidence links are.
+
+Milestone 12 update: each chunk's VectorPoint now carries
+`embedding_model_version` (see app/services/embeddings.py and
+app/services/vector_repo.py) -- purely descriptive metadata read from the
+already-resolved `embedder`, no change to what gets embedded or how.
 """
 
 from __future__ import annotations
@@ -241,6 +246,11 @@ def process_document(db: Session, resource_id: str) -> None:
                     chunk_id=point_id,
                     page_number=chunk.page_number,
                     content=chunk.content,
+                    # Milestone 12 (Section 4.2): tags this point with the
+                    # embedding provider that produced it, so a later
+                    # provider/model change is detectable instead of
+                    # silently mixing embedding spaces in one collection.
+                    embedding_model_version=embedder.version,
                 )
             )
 

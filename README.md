@@ -8,17 +8,17 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](apps/api/requirements.txt)
 [![Next.js](https://img.shields.io/badge/frontend-Next.js-black.svg)](apps/web/package.json)
 
-> **Status: Milestone 11 of 12 -- Confidence & Correction UX -- implemented
-> and verified (commit `12e93c0`), to be tagged `v0.11.0`.** Milestones
-> 1-11 are implemented, verified, and frozen. This README has two parts:
-> **Part 1** describes the finished product this project is building
-> toward; **Part 2** describes exactly what exists in this repository
-> right now.
+> **Status: Milestone 12 of 12 -- Production Hardening & Portfolio Polish
+> -- implemented, verified, and frozen (`v0.12.0`).** Milestones 1-12 are
+> implemented, verified, and frozen, completing the original 12-milestone
+> roadmap in full. This README has two parts: **Part 1** describes the
+> finished product this project is building toward; **Part 2** describes
+> exactly what exists in this repository right now.
 
 ## Contents
 
 - [Part 1 -- The Vision](#part-1----the-vision-what-this-becomes-when-complete)
-- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-11)
+- [Part 2 -- What's Built So Far](#part-2----whats-actually-built-so-far-through-milestone-12)
 - [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
@@ -107,7 +107,7 @@ document this repository is built against.
 
 ---
 
-## Part 2 -- What's Actually Built So Far (Through Milestone 11)
+## Part 2 -- What's Actually Built So Far (Through Milestone 12)
 
 Everything below is real, implemented, tested, and frozen -- not a plan.
 
@@ -205,7 +205,7 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
     and frontend build (all 14 routes) both green. Full record in
     [`docs/milestones/MILESTONE_10.md`](docs/milestones/MILESTONE_10.md)
     and [`docs/adr/0017-study-workflows.md`](docs/adr/0017-study-workflows.md).
-- **M11 -- Confidence & Correction UX** (`v0.11.0`, current): surfaces
+- **M11 -- Confidence & Correction UX** (`v0.11.0`): surfaces
   confidence/correction signals that already existed in the data model
   but never reached the API or UI -- no new confidence computation
   anywhere.
@@ -238,6 +238,43 @@ Everything below is real, implemented, tested, and frozen -- not a plan.
     file this milestone touched; `tsc --noEmit` clean. Full record in
     [`docs/milestones/MILESTONE_11.md`](docs/milestones/MILESTONE_11.md)
     and [`docs/adr/0018-confidence-correction-ux.md`](docs/adr/0018-confidence-correction-ux.md).
+- **M12 -- Production Hardening & Portfolio Polish** (`v0.12.0`, final):
+  a hardening pass over Milestones 1-11, not a feature
+  milestone -- concludes the original 12-milestone roadmap as tabled.
+  - **BackgroundTask re-evaluation**: re-checked against
+    [ADR-0005](docs/adr/0005-ingestion-background-task.md)'s own trigger
+    conditions (multi-instance workers, retry/backoff, independent
+    scaling) using this project's real profile -- none met, so
+    `BackgroundTask` is retained. The one genuine gap found -- a crashed
+    process leaves an `IngestionJob` stuck `RUNNING` forever -- is closed
+    by a startup-time stale-job reconciliation check
+    (`app/services/job_reconciliation.py`), not a queue migration.
+  - **Embedding-version tagging**: every vector point (both Qdrant
+    collections) now carries an `embedding_model_version` string, and
+    `app/services/reembed.py` provides a batched, resumable re-embed
+    procedure -- built ahead of the first real model upgrade, per the
+    architecture doc's own "not as an afterthought" guidance.
+  - **Multi-format seed data**: one fixture per remaining supported
+    source type (DOCX, PPTX, Markdown, code, image OCR, YouTube
+    reference), seeded end to end through the real upload path via
+    `demo-data/seed.py`.
+  - **Two issues discovered live**, during real (not `TestClient`-only)
+    verification, and fixed as documented amendments: a concept-resolution
+    concurrency race under genuine concurrent `BackgroundTask` ingestion
+    (closed with a partial unique index plus an `IntegrityError`-recovery
+    path in `resolve_concept()`), and a backend/frontend contract mismatch
+    that left the live chat compose UI permanently hidden (`GET
+    /workspace` now returns the `stats` the frontend had expected since
+    Milestone 4). Full discovery and fix detail in
+    [`docs/milestones/MILESTONE_12.md`](docs/milestones/MILESTONE_12.md)
+    Sections 12-13.
+  - Screenshots and [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) captured
+    against this real, fixed, seeded deployment -- not staged or mocked.
+  - Verified: 228 tests passing, 0 failing, 0 skipped (36 test files);
+    Ruff and Black clean (`ruff check app tests` / `black --check app
+    tests`); `tsc --noEmit` clean. Full record in
+    [`docs/milestones/MILESTONE_12.md`](docs/milestones/MILESTONE_12.md)
+    and [`docs/adr/0019-production-hardening.md`](docs/adr/0019-production-hardening.md).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the itemized Added/Changed/Fixed
 list behind every tag above.
@@ -276,24 +313,44 @@ list behind every tag above.
 
 ### What's deliberately not built yet
 
-- No production hardening pass -- queue-vs-BackgroundTask re-evaluation
-  under real load, embedding-version migration tooling, full seed data,
-  demo script (M12).
+The original 12-milestone roadmap is now complete in full. Everything
+below is out of scope by deliberate decision, not an oversight:
+
+- **Backup/restore** for the `postgres_data`/`qdrant_data`/`api_storage`
+  Docker volumes -- documented as a future operational enhancement in
+  [`docs/milestones/MILESTONE_12.md`](docs/milestones/MILESTONE_12.md)
+  Section 7; revisit trigger is the system moving from demo/portfolio use
+  to genuine sole-copy, long-term daily use of real personal data.
+- **Any Vision v2 capability** -- Capture (quick notes, pasted text,
+  URL/screenshot/voice-note capture), a Personal Learning Layer (exposure
+  tracking, self-reported confidence, mastery scoring, spaced repetition),
+  typed concept relationships beyond Milestone 7, a Knowledge Timeline,
+  Proactive AI, or concept synthesis. These would be a distinct future
+  initiative requiring its own explicit approval and design pass, not a
+  continuation of this roadmap.
+- **A real task-queue migration** (Celery, Temporal, or otherwise) --
+  Milestone 12's own re-evaluation against ADR-0005's trigger conditions
+  concluded `BackgroundTask` should be retained; see
+  [`docs/adr/0019-production-hardening.md`](docs/adr/0019-production-hardening.md).
+- **Chat-answer feedback** (thumbs up/down/flagging) -- deferred by
+  Milestone 11 ([ADR-0018](docs/adr/0018-confidence-correction-ux.md)).
+- **A production deploy target beyond Docker Compose** (Kubernetes, a
+  managed cloud deployment guide) -- [ADR-0009](docs/adr/0009-docker-compose-not-kubernetes.md)
+  reconfirmed by Milestone 12, not revisited.
 
 ---
 
 ## Screenshots
 
-Not yet checked in -- see
+Captured from a real seeded workspace (Milestone 12 Item 3's multi-format
+demo data) against the actual running application -- see
 [`docs/assets/screenshots/README.md`](docs/assets/screenshots/README.md)
-for exactly which screens to capture and the expected file names. Once
-added, they'll be embedded here:
+for the capture spec.
 
-<!--
 ![Documents library](docs/assets/screenshots/documents-library.png)
 ![Concept graph](docs/assets/screenshots/concept-graph.png)
 ![Chat with provenance](docs/assets/screenshots/chat-provenance.png)
--->
+![Upload flow](docs/assets/screenshots/upload-flow.png)
 
 ## Tech Stack
 
@@ -328,7 +385,7 @@ Full ingestion-flow and retrieval/provenance-flow diagrams, plus the
 reasoning behind each architectural choice, live in
 [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md).
 Individual decisions are recorded as ADRs in [`docs/adr/`](docs/adr/)
-(18 so far, one per significant decision).
+(19 so far, one per significant decision).
 
 ## Quickstart
 
@@ -380,7 +437,7 @@ supported format.
 ```bash
 cd apps/api
 pip install -r requirements-dev.txt
-pytest -q      # 207 passed, 3 skipped
+pytest -q      # 228 passed, 0 skipped
 ruff check app tests
 black --check app tests
 ```
@@ -420,9 +477,11 @@ knowledgehub-ai/
 │   │   │   ├── services/study_signals.py         # M10 -- live (shared by Revision + Study planner)
 │   │   │   ├── models/study.py                   # M10 -- live (QuizAttempt, VivaSession)
 │   │   │   ├── models/correction.py              # M11 -- live (ResourceCorrection, CorrectionField)
+│   │   │   ├── services/job_reconciliation.py    # M12 -- live (stale IngestionJob reconciliation)
+│   │   │   ├── services/reembed.py               # M12 -- live (embedding-version re-embed tooling)
 │   │   │   ├── core/, db/, models/, schemas/
 │   │   │   └── main.py
-│   │   ├── alembic/versions/                     # M4-M11 migrations
+│   │   ├── alembic/versions/                     # M4-M12 migrations
 │   │   └── tests/
 │   └── web/
 │       ├── app/
@@ -436,11 +495,12 @@ knowledgehub-ai/
 │       ├── components/StudyPanels.tsx            # M10 -- live (Quiz/Flashcards/Viva panels)
 │       ├── components/, lib/
 ├── docs/
-│   ├── adr/                # architecture decision records, 0001-0018
+│   ├── adr/                # architecture decision records, 0001-0019
 │   ├── milestones/          # per-milestone design/implementation/verification
 │   ├── architecture/        # system architecture + diagrams
+│   ├── DEMO_SCRIPT.md       # guided walkthrough (M12)
 │   └── assets/screenshots/  # README screenshots (see its own README)
-├── demo-data/                # sample source files across supported formats
+├── demo-data/                # sample source files across every supported format (M12: DOCX/PPTX/MD/code/image/YouTube)
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
@@ -463,8 +523,12 @@ knowledgehub-ai/
 | 8 | Local-First Retrieval & Provenance | Hybrid retrieval, sufficiency scorer, provenance, consent-gated fallback | Frozen (`v0.8.0-local-first-retrieval`) |
 | 9 | Intent Workflows | Explain, Compare, Summarize, Search as distinct intents | Frozen (`v0.9.0-intent-workflows`) |
 | 10 | Study Workflows | Quiz me, Flashcards, Viva mode, Revision mode, study planner | Frozen (`v0.10.0`) |
-| 11 | Confidence & Correction UX | Correction history, document re-extraction, confidence metadata surfaced in the UI | **Frozen -- current** (`v0.11.0`) |
-| 12 | Production Hardening & Portfolio Polish | Queue re-evaluation, embedding migrations, seed data, docs, demo | Not started |
+| 11 | Confidence & Correction UX | Correction history, document re-extraction, confidence metadata surfaced in the UI | Frozen (`v0.11.0`) |
+| 12 | Production Hardening & Portfolio Polish | Queue re-evaluation, embedding migrations, seed data, docs, demo | **Frozen -- final** (`v0.12.0`) |
+
+The original 12-milestone roadmap is now complete. Any further work
+(Vision v2 capabilities, backup/restore, etc.) would be a distinct future
+initiative -- see "What's deliberately not built yet" above.
 
 Detailed architecture decisions for the whole system live in
 [`docs/adr/`](docs/adr/); per-milestone design, implementation, and

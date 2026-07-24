@@ -27,6 +27,17 @@ point only has to populate what actually applies to it -- the same
 "extend the meaning of an existing type rather than fork it" precedent
 already used for `page_number` (services/extraction.py) and for
 `document_id` itself (this field's own comment, below).
+
+Milestone 12 addition (Section 4.2): `VectorPoint` gains
+`embedding_model_version`, stored on every point (both collections) so a
+provider/model change is detectable rather than silently mixing two
+incompatible embedding spaces together. `QdrantVectorRepository.__init__`
+additionally ensures a payload index exists on this field even for a
+collection that already existed before this milestone -- see the
+defensive `payload_schema` check below, added because whether
+`create_payload_index` is safe to call again on an already-indexed field
+is not documented one way or the other in the pinned qdrant-client
+version this project uses.
 """
 
 from __future__ import annotations
@@ -58,6 +69,12 @@ class VectorPoint:
     # code reading a concept point should not have to remember that
     # "document_id" secretly means "concept_id" here.
     concept_id: str | None = None
+    # Milestone 12 (Section 4.2): which EmbeddingProvider produced this
+    # point's vector (e.g. "local-hash-v1", "openai:text-embedding-3-small").
+    # Defaulted to "" (not None) so every existing call site that doesn't
+    # pass it explicitly keeps constructing a valid VectorPoint -- additive,
+    # not a breaking change to this dataclass's constructor.
+    embedding_model_version: str = ""
 
 
 @dataclass
@@ -143,6 +160,25 @@ class QdrantVectorRepository(VectorRepository):
             self.client.create_payload_index(
                 collection_name=collection, field_name="concept_id", field_schema="keyword"
             )
+            self.client.create_payload_index(
+                collection_name=collection, field_name="embedding_model_version", field_schema="keyword"
+            )
+        else:
+            # Milestone 12 (Section 4.2): a collection created before this
+            # milestone (every real deployment's collections, since both
+            # `document_chunks_v1` and `concept_vectors_v1` already existed)
+            # never got the embedding_model_version index above -- the
+            # `if collection not in existing` branch only runs once, at
+            # first creation. Checked defensively via payload_schema (not
+            # just called unconditionally) because this project's pinned
+            # qdrant-client version does not document whether
+            # create_payload_index errors or no-ops when the field is
+            # already indexed.
+            info = self.client.get_collection(collection)
+            if "embedding_model_version" not in info.payload_schema:
+                self.client.create_payload_index(
+                    collection_name=collection, field_name="embedding_model_version", field_schema="keyword"
+                )
 
     def upsert(self, points: list[VectorPoint]) -> None:
         qm = self._qm
@@ -159,6 +195,7 @@ class QdrantVectorRepository(VectorRepository):
                         "page_number": p.page_number,
                         "content": p.content,
                         "concept_id": p.concept_id,
+                        "embedding_model_version": p.embedding_model_version,
                     },
                 )
                 for p in points
@@ -189,6 +226,7 @@ class QdrantVectorRepository(VectorRepository):
                         page_number=payload.get("page_number", 0),
                         content=payload.get("content", ""),
                         concept_id=payload.get("concept_id"),
+                        embedding_model_version=payload.get("embedding_model_version", ""),
                     ),
                     score=h.score,
                 )
